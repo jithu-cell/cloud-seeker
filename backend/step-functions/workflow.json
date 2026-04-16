@@ -1,0 +1,150 @@
+{
+  "Comment": "Cloud Seeker — Security Event Analysis Workflow",
+  "StartAt": "AnalyzeEvent",
+  "States": {
+    "AnalyzeEvent": {
+      "Type": "Task",
+      "Resource": "${AnalyzerLambdaArn}",
+      "ResultPath": "$.analysis",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleError",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "IsThreatDetected"
+    },
+
+    "IsThreatDetected": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.analysis.threat_detected",
+          "BooleanEquals": true,
+          "Next": "ParallelAlertActions"
+        }
+      ],
+      "Default": "EventClean"
+    },
+
+    "ParallelAlertActions": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "SendSNSNotification",
+          "States": {
+            "SendSNSNotification": {
+              "Type": "Task",
+              "Resource": "${NotifierLambdaArn}",
+              "InputPath": "$.analysis",
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 2
+                }
+              ]
+            }
+          }
+        },
+        {
+          "StartAt": "CheckCompliance",
+          "States": {
+            "CheckCompliance": {
+              "Type": "Task",
+              "Resource": "${ComplianceLambdaArn}",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.parallel_results",
+      "Next": "CheckSeverity"
+    },
+
+    "CheckSeverity": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.analysis.severity",
+          "StringEquals": "CRITICAL",
+          "Next": "EscalateCritical"
+        },
+        {
+          "Variable": "$.analysis.severity",
+          "StringEquals": "HIGH",
+          "Next": "LogHighSeverity"
+        }
+      ],
+      "Default": "WorkflowComplete"
+    },
+
+    "EscalateCritical": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Message.$": "States.Format('🚨 CRITICAL ALERT: {} - {} - Alert ID: {}', $.analysis.event_name, $.analysis.reason, $.analysis.alert_id)",
+        "Subject": "CRITICAL Security Alert — Immediate Action Required"
+      },
+      "Next": "WorkflowComplete"
+    },
+
+    "LogHighSeverity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${AlertsTable}",
+        "Key": {
+          "alert_id": {
+            "S.$": "$.analysis.alert_id"
+          }
+        },
+        "UpdateExpression": "SET escalated = :val",
+        "ExpressionAttributeValues": {
+          ":val": { "BOOL": true }
+        }
+      },
+      "Next": "WorkflowComplete"
+    },
+
+    "EventClean": {
+      "Type": "Pass",
+      "Result": { "status": "clean", "message": "No threat detected" },
+      "End": true
+    },
+
+    "HandleError": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Message.$": "States.Format('Cloud Seeker workflow error: {}', $.error.Cause)",
+        "Subject": "Cloud Seeker — Workflow Error"
+      },
+      "Next": "WorkflowFailed"
+    },
+
+    "WorkflowFailed": {
+      "Type": "Fail",
+      "Error": "WorkflowError",
+      "Cause": "Step Functions workflow encountered an unrecoverable error"
+    },
+
+    "WorkflowComplete": {
+      "Type": "Pass",
+      "Result": { "status": "complete" },
+      "End": true
+    }
+  }
+}

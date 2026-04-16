@@ -1,0 +1,54 @@
+# ─── Node / Frontend ─────────────────────────
+node_modules/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+.npm
+
+# ─── Python / Backend ────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── AWS SAM / CDK ───────────────────────────
+.aws-sam/
+samconfig.toml
+cdk.out/
+*.template.json
+packaged.yaml
+
+# ─── Secrets / Credentials ───────────────────
+.env*
+!.env.example
+*.pem
+*.key
+credentials
+aws-credentials.json
+
+# ─── IDE ─────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Logs ────────────────────────────────────
+*.log
+logs/
+
+# ─── Test artifacts ──────────────────────────
+coverage/
+.nyc_output/

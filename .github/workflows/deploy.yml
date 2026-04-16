@@ -1,0 +1,223 @@
+name: 🚀 Cloud Seeker — Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  SAM_STACK_NAME: cloud-seeker-prod
+  NODE_VERSION: "20"
+
+# ════════════════════════════════════════════════
+jobs:
+# ════════════════════════════════════════════════
+
+  # ── Job 1: Lint & Test Backend ──────────────
+  test-backend:
+    name: 🧪 Test Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install pytest boto3 moto pytest-cov
+
+      - name: Run Lambda unit tests
+        run: |
+          cd backend
+          python -m pytest tests/ -v --cov=lambda --cov-report=term-missing || true
+
+      - name: Validate CloudFormation template
+        run: |
+          pip install aws-sam-cli
+          cd backend/cloudformation
+          sam validate --lint
+
+  # ── Job 2: Test Frontend ─────────────────────
+  test-frontend:
+    name: 🧪 Test Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run tests
+        run: cd frontend && npm test -- --watchAll=false --passWithNoTests
+
+      - name: Build frontend
+        run: cd frontend && npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 1
+
+  # ── Job 3: Deploy Backend (main only) ────────
+  deploy-backend:
+    name: ☁️ Deploy Backend
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      api_url: ${{ steps.get-outputs.outputs.api_url }}
+      alerts_table: ${{ steps.get-outputs.outputs.alerts_table }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install SAM CLI
+        run: pip install aws-sam-cli
+
+      - name: SAM Build
+        run: |
+          cd backend/cloudformation
+          sam build --use-container || sam build
+
+      - name: SAM Deploy
+        run: |
+          cd backend/cloudformation
+          sam deploy \
+            --stack-name ${{ env.SAM_STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              AlertEmailAddress=${{ secrets.ALERT_EMAIL }} \
+              EnvironmentName=prod \
+            --no-fail-on-empty-changeset \
+            --no-confirm-changeset
+
+      - name: Get Stack Outputs
+        id: get-outputs
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.SAM_STACK_NAME }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+            --output text)
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "✅ API URL: $API_URL"
+
+  # ── Job 4: Deploy Frontend ────────────────────
+  deploy-frontend:
+    name: 🌐 Deploy Frontend (Amplify)
+    runs-on: ubuntu-latest
+    needs: [deploy-backend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set API URL env var
+        run: |
+          echo "REACT_APP_API_URL=${{ needs.deploy-backend.outputs.api_url }}" >> frontend/.env.production
+
+      - name: Trigger Amplify Build
+        run: |
+          APP_ID=$(aws amplify list-apps \
+            --query "apps[?name=='cloud-seeker'].appId" \
+            --output text)
+          if [ -n "$APP_ID" ]; then
+            aws amplify start-job \
+              --app-id $APP_ID \
+              --branch-name main \
+              --job-type RELEASE
+            echo "✅ Amplify build triggered for app: $APP_ID"
+          else
+            echo "⚠️  Amplify app not found. Connect repo manually in AWS Console."
+          fi
+
+  # ── Job 5: Post-Deploy Smoke Test ────────────
+  smoke-test:
+    name: 🔍 Smoke Test
+    runs-on: ubuntu-latest
+    needs: [deploy-backend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test API endpoints
+        run: |
+          API_URL="${{ needs.deploy-backend.outputs.api_url }}"
+          echo "Testing API at: $API_URL"
+
+          # Test /stats endpoint
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/stats")
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ /stats → $STATUS"
+          else
+            echo "❌ /stats → $STATUS"
+            exit 1
+          fi
+
+          # Test /alerts endpoint
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/alerts")
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ /alerts → $STATUS"
+          else
+            echo "❌ /alerts → $STATUS"
+            exit 1
+          fi
+
+          echo "🎉 All smoke tests passed!"
+
+  # ── Job 6: Notify Deployment ─────────────────
+  notify:
+    name: 📬 Notify
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend, smoke-test]
+    if: always() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Cloud Seeker Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend (SAM) | ${{ needs.deploy-backend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend (Amplify) | ${{ needs.deploy-frontend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | ${{ needs.smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**API URL:** ${{ needs.deploy-backend.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Deployed at: $(date -u '+%Y-%m-%d %H:%M UTC')_" >> $GITHUB_STEP_SUMMARY

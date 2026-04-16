@@ -1,0 +1,443 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Cloud Seeker — AWS Security Monitoring Platform
+  Deploys: CloudTrail, S3, EventBridge, Step Functions, Lambda,
+           DynamoDB, SNS, CloudWatch, Config, API Gateway
+
+# ════════════════════════════════════════════════════════
+# PARAMETERS
+# ════════════════════════════════════════════════════════
+Parameters:
+  AlertEmailAddress:
+    Type: String
+    Description: "Email address to receive security alerts"
+    Default: "your-email@example.com"
+
+  EnvironmentName:
+    Type: String
+    Default: "prod"
+    AllowedValues: ["dev", "staging", "prod"]
+
+  RetentionDays:
+    Type: Number
+    Default: 90
+    Description: "CloudWatch log retention period in days"
+
+# ════════════════════════════════════════════════════════
+# GLOBALS
+# ════════════════════════════════════════════════════════
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        ALERTS_TABLE: !Ref AlertsTable
+        SNS_TOPIC_ARN: !Ref AlertsTopic
+        ENV: !Ref EnvironmentName
+
+# ════════════════════════════════════════════════════════
+# RESOURCES
+# ════════════════════════════════════════════════════════
+Resources:
+
+  # ── 1. CloudTrail ──────────────────────────────────────
+  CloudSeekerTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: !Sub "cloud-seeker-trail-${EnvironmentName}"
+      S3BucketName: !Ref CloudTrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+          DataResources:
+            - Type: AWS::S3::Object
+              Values: ["arn:aws:s3:::"]
+            - Type: AWS::Lambda::Function
+              Values: ["arn:aws:lambda"]
+      CloudWatchLogsLogGroupArn: !GetAtt CloudTrailLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt CloudTrailRole.Arn
+      Tags:
+        - Key: Project
+          Value: CloudSeeker
+
+  # ── 2. S3 Bucket (CloudTrail Logs) ────────────────────
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cloud-seeker-logs-${AWS::AccountId}-${EnvironmentName}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveLogs
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !Sub "arn:aws:s3:::${CloudTrailBucket}"
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${CloudTrailBucket}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": "bucket-owner-full-control"
+
+  # ── 3. EventBridge Rule ────────────────────────────────
+  SecurityEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "cloud-seeker-security-events-${EnvironmentName}"
+      Description: "Captures high-risk AWS API calls and routes to Step Functions"
+      EventPattern:
+        source:
+          - "aws.cloudtrail"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventName:
+            - "ConsoleLogin"
+            - "AuthorizeSecurityGroupIngress"
+            - "DeleteTrail"
+            - "StopLogging"
+            - "CreateAccessKey"
+            - "PutUserPolicy"
+            - "PutRolePolicy"
+            - "PutBucketAcl"
+            - "PutBucketPolicy"
+            - "DisableKey"
+            - "ScheduleKeyDeletion"
+            - "DeleteVpc"
+            - "ModifyInstanceAttribute"
+      State: ENABLED
+      Targets:
+        - Id: StepFunctionsTarget
+          Arn: !GetAtt SecurityWorkflow.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  # ── 4. Step Functions ──────────────────────────────────
+  SecurityWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "cloud-seeker-workflow-${EnvironmentName}"
+      DefinitionUri: ../step-functions/workflow.json
+      DefinitionSubstitutions:
+        AnalyzerLambdaArn: !GetAtt AnalyzerFunction.Arn
+        NotifierLambdaArn: !GetAtt NotifierFunction.Arn
+        ComplianceLambdaArn: !GetAtt ComplianceFunction.Arn
+        SNSTopicArn: !Ref AlertsTopic
+        AlertsTable: !Ref AlertsTable
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AnalyzerFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref NotifierFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ComplianceFunction
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - DynamoDBWritePolicy:
+            TableName: !Ref AlertsTable
+
+  # ── 5. Lambda Functions ────────────────────────────────
+  AnalyzerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloud-seeker-analyzer-${EnvironmentName}"
+      CodeUri: ../lambda/analyzer/
+      Handler: index.lambda_handler
+      Description: "Analyzes CloudTrail events for security threats"
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref AlertsTable
+        - CloudWatchPutMetricPolicy: {}
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "sns:Publish"
+              Resource: !Ref AlertsTopic
+
+  NotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloud-seeker-notifier-${EnvironmentName}"
+      CodeUri: ../lambda/analyzer/
+      Handler: notifier.lambda_handler
+      Description: "Sends SNS alerts when threats are detected"
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+
+  ComplianceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloud-seeker-compliance-${EnvironmentName}"
+      CodeUri: ../lambda/compliance-checker/
+      Handler: index.lambda_handler
+      Timeout: 60
+      Description: "Runs AWS Config compliance checks"
+      Policies:
+        - CloudWatchPutMetricPolicy: {}
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "config:DescribeComplianceByConfigRule"
+                - "config:GetComplianceSummaryByConfigRule"
+                - "cloudtrail:DescribeTrails"
+                - "cloudtrail:GetTrailStatus"
+                - "iam:GetAccountSummary"
+                - "iam:GetAccountPasswordPolicy"
+              Resource: "*"
+
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloud-seeker-api-${EnvironmentName}"
+      CodeUri: ../lambda/api-handler/
+      Handler: index.lambda_handler
+      Description: "REST API for the Cloud Seeker frontend"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref AlertsTable
+        - CloudWatchPutMetricPolicy: {}
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "config:DescribeComplianceByConfigRule"
+                - "cloudwatch:GetMetricStatistics"
+              Resource: "*"
+      Events:
+        GetAlerts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudSeekerApi
+            Path: /alerts
+            Method: GET
+        GetStats:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudSeekerApi
+            Path: /stats
+            Method: GET
+        GetCompliance:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudSeekerApi
+            Path: /compliance
+            Method: GET
+        ResolveAlert:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudSeekerApi
+            Path: /alerts/{id}/resolve
+            Method: POST
+        Options:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudSeekerApi
+            Path: /{proxy+}
+            Method: OPTIONS
+
+  # ── 6. DynamoDB Table ──────────────────────────────────
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "cloud-seeker-alerts-${EnvironmentName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: alert_id
+          AttributeType: S
+        - AttributeName: severity
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alert_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: severity-index
+          KeySchema:
+            - AttributeName: severity
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: CloudSeeker
+
+  # ── 7. SNS Topic ───────────────────────────────────────
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "cloud-seeker-alerts-${EnvironmentName}"
+      DisplayName: "Cloud Seeker Security Alerts"
+      KmsMasterKeyId: alias/aws/sns
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmailAddress
+
+  # ── 8. CloudWatch Alarms ───────────────────────────────
+  CriticalAlertAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "cloud-seeker-critical-alerts-${EnvironmentName}"
+      AlarmDescription: "Triggers when critical security events are detected"
+      Namespace: "CloudSeeker/Security"
+      MetricName: ThreatDetected
+      Dimensions:
+        - Name: Severity
+          Value: CRITICAL
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Statistic: Sum
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  CloudTrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/cloudtrail/cloud-seeker-${EnvironmentName}"
+      RetentionInDays: !Ref RetentionDays
+
+  # ── 9. API Gateway ─────────────────────────────────────
+  CloudSeekerApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "cloud-seeker-api-${EnvironmentName}"
+      StageName: !Ref EnvironmentName
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: NONE
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          MetricsEnabled: true
+          DataTraceEnabled: true
+          LoggingLevel: INFO
+
+  # ── IAM Roles ──────────────────────────────────────────
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: StartExecution
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "states:StartExecution"
+                Resource: !GetAtt SecurityWorkflow.Arn
+
+  CloudTrailRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !GetAtt CloudTrailLogGroup.Arn
+
+# ════════════════════════════════════════════════════════
+# OUTPUTS
+# ════════════════════════════════════════════════════════
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${CloudSeekerApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}"
+    Export:
+      Name: !Sub "CloudSeekerApiUrl-${EnvironmentName}"
+
+  AlertsTableName:
+    Description: "DynamoDB table name"
+    Value: !Ref AlertsTable
+    Export:
+      Name: !Sub "CloudSeekerAlertsTable-${EnvironmentName}"
+
+  SNSTopicArn:
+    Description: "SNS Topic ARN for alerts"
+    Value: !Ref AlertsTopic
+
+  WorkflowArn:
+    Description: "Step Functions state machine ARN"
+    Value: !GetAtt SecurityWorkflow.Arn
+
+  CloudTrailBucketName:
+    Description: "S3 bucket for CloudTrail logs"
+    Value: !Ref CloudTrailBucket
