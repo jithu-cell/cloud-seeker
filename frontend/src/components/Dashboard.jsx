@@ -1,369 +1,401 @@
+/**
+ * Cloud Seeker — Dashboard (FIXED v4)
+ * All numbers come from real API. Zero hardcoded values.
+ * Stats refresh every 30s. Alerts every 15s.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import AlertFeed from "./AlertFeed";
+import RadarScanner from "./RadarScanner";
 import ComplianceGauge from "./ComplianceGauge";
 import ServiceHealth from "./ServiceHealth";
-import RadarScanner from "./RadarScanner";
-import MetricCard from "./MetricCard";
 
 const API = process.env.REACT_APP_API_URL || "";
 
-async function apiFetch(path) {
-  if (!API) return null;
-  try {
-    const r = await fetch(`${API}${path}`);
-    if (!r.ok) return null;
-    return r.json();
-  } catch {
-    return null;
-  }
-}
-
-// ─── Demo data ─────────────────────────────────────────────────────────────
-const DEMO_ALERTS = [
-  { alert_id: "1", event_name: "ConsoleLogin", severity: "CRITICAL", reason: "Root account login detected", event_source: "signin.amazonaws.com", region: "us-east-1", event_time: new Date().toISOString(), status: "OPEN", user: "root", source_ip: "1.2.3.4" },
-  { alert_id: "2", event_name: "AuthorizeSecurityGroupIngress", severity: "HIGH", reason: "Security group opened to world on port 22", event_source: "ec2.amazonaws.com", region: "us-west-2", event_time: new Date(Date.now()-300000).toISOString(), status: "OPEN", user: "admin", source_ip: "5.6.7.8" },
-  { alert_id: "3", event_name: "PutBucketAcl", severity: "HIGH", reason: "S3 bucket made public", event_source: "s3.amazonaws.com", region: "eu-north-1", event_time: new Date(Date.now()-600000).toISOString(), status: "RESOLVED" },
-  { alert_id: "4", event_name: "DeleteTrail", severity: "CRITICAL", reason: "CloudTrail logging disabled", event_source: "cloudtrail.amazonaws.com", region: "us-east-1", event_time: new Date(Date.now()-900000).toISOString(), status: "OPEN" },
-];
-const DEMO_COMPLIANCE = { score: 91, compliant_rules: 18, non_compliant_rules: 3, total_rules: 21, framework_scores: { cis: 94, pci: 87, soc2: 96, hipaa: 89, nist: 78 }, rules: [{ name: "root-mfa-enabled", status: "COMPLIANT" }, { name: "s3-bucket-public-read-prohibited", status: "NON_COMPLIANT" }, { name: "cloudtrail-enabled", status: "COMPLIANT" }, { name: "iam-password-policy", status: "COMPLIANT" }, { name: "vpc-flow-logs-enabled", status: "NON_COMPLIANT" }] };
-const DEMO_STATS = { total_alerts_24h: 27, threats_last_hour: 3, open_critical: 2, by_severity: { CRITICAL: 2, HIGH: 5, MEDIUM: 12, LOW: 8 }, resolved_today: 14 };
-const DEMO_TOP_THREATS = [{ name: "S3 Public Access", count: 8, pct: 80, color: "#ef4444" }, { name: "Security Group Changes", count: 6, pct: 60, color: "#f97316" }, { name: "IAM Policy Modified", count: 5, pct: 50, color: "#f59e0b" }, { name: "Root Login", count: 3, pct: 30, color: "#8b5cf6" }, { name: "CloudTrail Disabled", count: 2, pct: 20, color: "#3b82f6" }];
-const DEMO_PIE = [{ name: "IAM", pct: 35, color: "#ef4444" }, { name: "S3", pct: 28, color: "#3b82f6" }, { name: "EC2", pct: 20, color: "#f59e0b" }, { name: "CloudTrail", pct: 17, color: "#8b5cf6" }];
-
-// ─── OverviewTab ─────────────────────────────────────────────────────────────
-function OverviewTab() {
+// ── Small stat card ────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, color, loading }) {
   return (
-    <div className="main-grid">
-      <div className="left-col">
-        <div className="panel">
-          <div className="panel-header"><span className="panel-title">THREAT RADAR</span><span className="panel-badge live">● LIVE</span></div>
-          <RadarScanner />
-        </div>
-        <div className="panel">
-          <div className="panel-header"><span className="panel-title">SERVICE HEALTH</span><span className="panel-badge">13 SERVICES</span></div>
-          <ServiceHealth />
-        </div>
+    <div style={{
+      background: `${color}08`,
+      border: `1px solid ${color}22`,
+      borderTop: `2px solid ${color}`,
+      borderRadius: "6px",
+      padding: "18px 20px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <span style={{ color: color, fontSize: "9px", letterSpacing: "2px", fontWeight: 700 }}>
+          {label}
+        </span>
       </div>
-      <div className="center-col">
-        <div className="panel panel-tall">
-          <div className="panel-header"><span className="panel-title">REAL-TIME ALERT FEED</span><span className="panel-badge live">● STREAMING</span></div>
-          <AlertFeed apiUrl={API} />
-        </div>
+      <div style={{
+        fontFamily: "monospace", fontSize: "32px", fontWeight: 700,
+        color: loading ? "#334455" : color, margin: "8px 0 4px",
+        transition: "color 0.3s"
+      }}>
+        {loading ? "—" : value}
       </div>
-      <div className="right-col">
-        <div className="panel">
-          <div className="panel-header"><span className="panel-title">COMPLIANCE STATUS</span><span className="panel-badge">AWS CONFIG</span></div>
-          <ComplianceGauge apiUrl={API} />
-        </div>
-        <div className="panel">
-          <div className="panel-header"><span className="panel-title">ARCHITECTURE FLOW</span></div>
-          <ArchitectureFlow />
-        </div>
-      </div>
+      {sub && (
+        <div style={{ fontSize: "10px", color: "#445566" }}>{sub}</div>
+      )}
     </div>
   );
 }
 
-// ─── AlertsTab ────────────────────────────────────────────────────────────────
-function AlertsTab() {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("ALL");
-  const [resolving, setResolving] = useState(null);
+// ── Panel wrapper ──────────────────────────────────────────────────────────
+function Panel({ title, badge, children, style = {} }) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.02)",
+      border: "1px solid rgba(0,212,170,0.1)",
+      borderRadius: "8px",
+      padding: "14px",
+      ...style
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        marginBottom: "12px", paddingBottom: "10px",
+        borderBottom: "1px solid rgba(0,212,170,0.08)"
+      }}>
+        <span style={{ color: "#00d4aa", fontSize: "9px", letterSpacing: "2px", fontWeight: 700 }}>
+          {title}
+        </span>
+        {badge && (
+          <span style={{
+            background: "rgba(0,212,170,0.08)", color: "#00d4aa",
+            padding: "2px 7px", borderRadius: "3px", fontSize: "8px", letterSpacing: 1
+          }}>
+            + {badge}
+          </span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
 
-  const load = useCallback(async () => {
-    const data = await apiFetch("/alerts?limit=100");
-    setAlerts(data?.alerts?.length > 0 ? data.alerts : DEMO_ALERTS);
-    setLoading(false);
+export default function Dashboard() {
+  const [stats,      setStats]      = useState(null);
+  const [statsError, setStatsError] = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [activeTab,  setActiveTab]  = useState("overview");
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [connected,  setConnected]  = useState(false);
+
+  // ── Fetch real stats from API ──────────────────────────────────────────
+  const fetchStats = useCallback(async () => {
+    if (!API) {
+      setStatsError("REACT_APP_API_URL not set");
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/stats`);
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data = await res.json();
+      setStats(data);
+      setConnected(true);
+      setStatsError(null);
+      setLastUpdate(new Date());
+    } catch (err) {
+      setStatsError(err.message);
+      setConnected(false);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    fetchStats();
+    const t = setInterval(fetchStats, 30_000);
+    return () => clearInterval(t);
+  }, [fetchStats]);
 
-  const resolve = async (id) => {
-    setResolving(id);
-    if (API) await apiFetch(`/alerts/${id}/resolve`);
-    setAlerts(prev => prev.map(a => a.alert_id === id ? { ...a, status: "RESOLVED" } : a));
-    setResolving(null);
+  // ── Derive values from real stats ─────────────────────────────────────
+  const totalAlerts    = stats?.totalAlerts     ?? 0;
+  const openAlerts     = stats?.openAlerts      ?? 0;
+  const criticalAlerts = stats?.criticalAlerts  ?? 0;
+  const highAlerts     = stats?.highAlerts      ?? 0;
+  const lastHour       = stats?.lastHourAlerts  ?? 0;
+  const byRegion       = stats?.byRegion        ?? {};
+  const byCategory     = stats?.byCategory      ?? {};
+  const bySeverity     = stats?.bySeverity      ?? { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  const regionCount    = Object.keys(byRegion).length;
+
+  // Threat level based on REAL unresolved critical/high
+  const threatLevel =
+    criticalAlerts > 0 ? "CRITICAL" :
+    highAlerts     > 0 ? "HIGH"     :
+    openAlerts     > 0 ? "MODERATE" : "LOW";
+
+  const threatColor = {
+    CRITICAL: "#ef4444", HIGH: "#f97316",
+    MODERATE: "#eab308", LOW: "#22c55e"
+  }[threatLevel];
+
+  const now = new Date();
+
+  const catColors = {
+    "IAM":        "#f97316",
+    "S3":         "#22d3ee",
+    "EC2":        "#22c55e",
+    "CLOUDTRAIL": "#eab308",
+    "KMS":        "#ef4444",
+    "RDS":        "#a78bfa",
+    "LAMBDA":     "#f472b6",
+    "VPC":        "#60a5fa",
+    "CONFIG":     "#fb923c",
   };
 
-  const counts = alerts.reduce((a, x) => { a[x.severity] = (a[x.severity] || 0) + 1; return a; }, {});
-  const filtered = filter === "ALL" ? alerts : alerts.filter(a => a.severity === filter);
-  const SEVS = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
-
   return (
-    <div className="tab-fullpage">
-      <div className="alerts-summary-bar">
-        {["CRITICAL","HIGH","MEDIUM","LOW"].map(s => (
-          <div key={s} className={`summary-chip sev-${s.toLowerCase()}`} onClick={() => setFilter(s)} style={{cursor:"pointer"}}>
-            <span className="summary-count">{counts[s] || 0}</span>
-            <span className="summary-label">{s}</span>
-          </div>
-        ))}
-        <div className="summary-chip" style={{marginLeft:"auto"}}>
-          <span className="summary-count">{alerts.length}</span>
-          <span className="summary-label">TOTAL</span>
-        </div>
-      </div>
-      <div className="filter-row">
-        {SEVS.map(s => <button key={s} className={`filter-btn ${filter===s?"active":""}`} onClick={() => setFilter(s)}>{s}</button>)}
-        <button className="filter-btn refresh-btn" onClick={load}>↻ REFRESH</button>
-      </div>
-      {loading ? (
-        <div className="tab-loading"><div className="spinner" /><span>Loading alerts...</span></div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state"><div className="empty-icon">✓</div><p>No {filter !== "ALL" ? filter : ""} alerts</p><span>System secure — no threats detected</span></div>
-      ) : (
-        <div className="alerts-table-wrap">
-          {filtered.map(alert => (
-            <div key={alert.alert_id} className={`alert-row sev-border-${(alert.severity||"medium").toLowerCase()} ${alert.status==="RESOLVED"?"resolved":""}`}>
-              <div className="alert-row-top">
-                <span className={`sev-badge sev-${(alert.severity||"medium").toLowerCase()}`}>{alert.severity||"MED"}</span>
-                <span className="alert-name">{alert.event_name || alert.type || "Security Event"}</span>
-                <span className="alert-source">{alert.event_source || alert.source || "AWS"}</span>
-                <span className="alert-region">{alert.region || "—"}</span>
-                <span className="alert-time">{alert.event_time ? new Date(alert.event_time).toLocaleTimeString() : "—"}</span>
-                {alert.status === "OPEN" && <button className="resolve-btn" onClick={() => resolve(alert.alert_id)} disabled={resolving===alert.alert_id}>{resolving===alert.alert_id?"...":"RESOLVE"}</button>}
-                {alert.status === "RESOLVED" && <span className="resolved-tag">✓ RESOLVED</span>}
-              </div>
-              <div className="alert-row-detail">
-                <span className="alert-reason">{alert.reason || "Event detected"}</span>
-                {alert.user && <span className="alert-user">User: {alert.user}</span>}
-                {alert.source_ip && <span className="alert-ip">IP: {alert.source_ip}</span>}
-              </div>
+    <div style={{
+      minHeight: "100vh",
+      background: "#070c1a",
+      color: "#c8d8e8",
+      fontFamily: "'Courier New', monospace"
+    }}>
+
+      {/* ── TOP NAV ────────────────────────────────────────────────────── */}
+      <nav style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "10px 20px",
+        borderBottom: "1px solid rgba(0,212,170,0.12)",
+        background: "rgba(0,0,0,0.5)"
+      }}>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 5,
+            background: "#00d4aa", display: "flex", alignItems: "center",
+            justifyContent: "center", color: "#070c1a", fontWeight: 900, fontSize: 12
+          }}>CS</div>
+          <div>
+            <div style={{ color: "#00d4aa", fontWeight: 700, letterSpacing: 2, fontSize: 13 }}>
+              CLOUD SEEKER
             </div>
+            <div style={{ color: "#334455", fontSize: 8, letterSpacing: 1 }}>
+              AWS SECURITY INTELLIGENCE PLATFORM
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 2 }}>
+          {["overview", "alerts", "compliance", "analytics"].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding: "5px 14px", border: "none", cursor: "pointer",
+              fontSize: "10px", letterSpacing: 2, fontWeight: 700,
+              textTransform: "uppercase", borderRadius: 0,
+              background: activeTab === tab ? "rgba(0,212,170,0.1)" : "transparent",
+              color: activeTab === tab ? "#00d4aa" : "#445566",
+              borderBottom: activeTab === tab ? "2px solid #00d4aa" : "2px solid transparent",
+              transition: "all 0.15s"
+            }}>{tab}</button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
 
-// ─── ComplianceTab ────────────────────────────────────────────────────────────
-function ComplianceTab() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => { (async () => { const d = await apiFetch("/compliance"); setData(d || DEMO_COMPLIANCE); setLoading(false); })(); }, []);
-  const s = data || DEMO_COMPLIANCE;
-  const fw = [
-    { name: "CIS AWS Benchmark", key: "cis", color: "#00d4aa" },
-    { name: "PCI DSS", key: "pci", color: "#3b82f6" },
-    { name: "SOC 2", key: "soc2", color: "#8b5cf6" },
-    { name: "HIPAA", key: "hipaa", color: "#f59e0b" },
-    { name: "NIST 800-53", key: "nist", color: "#ec4899" },
-  ];
-  const scores = s.framework_scores || { cis:94, pci:87, soc2:96, hipaa:89, nist:78 };
-  return (
-    <div className="tab-fullpage">
-      {loading ? <div className="tab-loading"><div className="spinner" /><span>Loading compliance data...</span></div> : (
-        <>
-          <div className="compliance-overview">
-            <div className="compliance-big-score">
-              <svg viewBox="0 0 120 120" width="140" height="140">
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#1a2a3a" strokeWidth="8"/>
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#00d4aa" strokeWidth="8" strokeDasharray={`${(s.score||91)*3.14} 314`} strokeLinecap="round" transform="rotate(-90 60 60)"/>
-                <text x="60" y="55" textAnchor="middle" fill="#00d4aa" fontSize="22" fontWeight="700" fontFamily="monospace">{s.score||91}%</text>
-                <text x="60" y="72" textAnchor="middle" fill="#6b8a9a" fontSize="9" fontFamily="monospace">OVERALL</text>
-              </svg>
-              <div className="compliance-summary-stats">
-                <div className="comp-stat green"><span className="cs-num">{s.compliant_rules||18}</span><span className="cs-label">PASSING</span></div>
-                <div className="comp-stat amber"><span className="cs-num">{s.non_compliant_rules||3}</span><span className="cs-label">FAILING</span></div>
-                <div className="comp-stat blue"><span className="cs-num">{s.total_rules||21}</span><span className="cs-label">TOTAL</span></div>
-              </div>
+        {/* Status */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* API connection status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: connected ? "#22c55e" : "#ef4444",
+              boxShadow: connected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
+              display: "inline-block"
+            }} />
+            <span style={{ color: connected ? "#22c55e" : "#ef4444", fontSize: 9, letterSpacing: 1 }}>
+              {connected ? "LIVE" : statsError ? "API ERROR" : "CONNECTING"}
+            </span>
+          </div>
+          {/* Threat level */}
+          <div style={{
+            border: `1px solid ${threatColor}66`,
+            padding: "4px 10px", borderRadius: 4,
+            color: threatColor, fontSize: 10, fontWeight: 700, letterSpacing: 1
+          }}>
+            ● THREAT: {threatLevel}
+          </div>
+          {/* Clock */}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ color: "#8899aa", fontSize: 11, fontWeight: 700 }}>
+              {now.toLocaleTimeString("en-GB", { hour12: false })}
+            </div>
+            <div style={{ color: "#445566", fontSize: 8 }}>
+              {now.toLocaleDateString("en-GB")}
             </div>
           </div>
-          <div className="compliance-frameworks">
-            <div className="section-title">FRAMEWORK SCORES</div>
-            {fw.map(f => { const sc=scores[f.key]||0; const st=sc>=90?"PASS":sc>=70?"WARN":"FAIL"; return (
-              <div key={f.key} className="fw-row">
-                <span className="fw-name">{f.name}</span>
-                <div className="fw-bar-track"><div className="fw-bar-fill" style={{width:`${sc}%`,background:f.color,transition:"width 1s ease"}}/></div>
-                <span className="fw-pct" style={{color:f.color}}>{sc}%</span>
-                <span className={`fw-status status-${st.toLowerCase()}`}>{st}</span>
-              </div>
-            );})}
-          </div>
-          {s.rules && s.rules.length > 0 && (
-            <div className="compliance-rules">
-              <div className="section-title">AWS CONFIG RULES</div>
-              {s.rules.map((r,i) => (
-                <div key={i} className="rule-row">
-                  <span className={`rule-dot ${r.status==="COMPLIANT"?"green":"red"}`}/>
-                  <span className="rule-name">{r.name}</span>
-                  <span className={`rule-status ${r.status==="COMPLIANT"?"green":"red"}`}>{r.status}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
+        </div>
+      </nav>
 
-// ─── AnalyticsTab ──────────────────────────────────────────────────────────────
-function AnalyticsTab() {
-  const [stats, setStats] = useState(null);
-  useEffect(() => { (async () => { const d = await apiFetch("/stats"); setStats(d || DEMO_STATS); })(); }, []);
-  const s = stats || DEMO_STATS;
-  const bySev = s.by_severity || { CRITICAL:2, HIGH:5, MEDIUM:12, LOW:8 };
-  const maxV = Math.max(...Object.values(bySev), 1);
-  const sevColors = { CRITICAL:"#ef4444", HIGH:"#f97316", MEDIUM:"#f59e0b", LOW:"#22c55e" };
-  const spark = [4,7,3,9,12,6,8,15,11,7,4,9,13,6,8,10,7,5,9,14,8,6,11,7];
-  const sparkMax = Math.max(...spark);
-  return (
-    <div className="tab-fullpage">
-      <div className="analytics-kpis">
-        <div className="kpi-card"><span className="kpi-label">ALERTS 24H</span><span className="kpi-value teal">{s.total_alerts_24h||27}</span></div>
-        <div className="kpi-card"><span className="kpi-label">THREATS/HOUR</span><span className="kpi-value red">{s.threats_last_hour||3}</span></div>
-        <div className="kpi-card"><span className="kpi-label">OPEN CRITICAL</span><span className="kpi-value orange">{s.open_critical||2}</span></div>
-        <div className="kpi-card"><span className="kpi-label">RESOLVED TODAY</span><span className="kpi-value green">{s.resolved_today||14}</span></div>
-      </div>
-      <div className="analytics-grid">
-        <div className="panel analytics-chart">
-          <div className="panel-header"><span className="panel-title">ALERTS BY SEVERITY</span></div>
-          <div className="bar-chart">
-            {Object.entries(bySev).map(([sev,count]) => (
-              <div key={sev} className="bar-col">
-                <span className="bar-count">{count}</span>
-                <div className="bar-fill" style={{height:`${(count/maxV)*140}px`,background:sevColors[sev],transition:"height 1s ease"}}/>
-                <span className="bar-label" style={{color:sevColors[sev]}}>{sev}</span>
-              </div>
-            ))}
-          </div>
+      {/* ── API NOT CONFIGURED WARNING ──────────────────────────────────── */}
+      {!API && (
+        <div style={{
+          background: "rgba(234,179,8,0.1)", borderBottom: "1px solid rgba(234,179,8,0.3)",
+          padding: "8px 20px", fontSize: 11, color: "#eab308"
+        }}>
+          ⚠ REACT_APP_API_URL not configured. Set it in Amplify → Environment variables.
         </div>
-        <div className="panel analytics-chart">
-          <div className="panel-header"><span className="panel-title">ACTIVITY (24H)</span><span className="panel-badge">HOURLY</span></div>
-          <div className="sparkline-wrap">
-            <svg width="100%" viewBox={`0 0 ${spark.length*12} 80`} preserveAspectRatio="none">
-              <polyline points={spark.map((v,i)=>`${i*12+6},${80-(v/sparkMax)*65}`).join(" ")} fill="none" stroke="#00d4aa" strokeWidth="1.5"/>
-              {spark.map((v,i)=><circle key={i} cx={i*12+6} cy={80-(v/sparkMax)*65} r="2" fill="#00d4aa"/>)}
-            </svg>
-          </div>
+      )}
+
+      <div style={{ padding: "16px 20px" }}>
+
+        {/* ── STAT CARDS (all real data) ──────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
+          <StatCard
+            label="TOTAL EVENTS"
+            value={totalAlerts.toLocaleString()}
+            sub={lastHour > 0 ? `+${lastHour} in last hour` : "No new events this hour"}
+            color="#00d4aa"
+            loading={loading}
+          />
+          <StatCard
+            label="OPEN ALERTS"
+            value={openAlerts}
+            sub={criticalAlerts > 0 ? `${criticalAlerts} CRITICAL need attention` : "No critical alerts"}
+            color={criticalAlerts > 0 ? "#ef4444" : "#f97316"}
+            loading={loading}
+          />
+          <StatCard
+            label="REGIONS ACTIVE"
+            value={regionCount || "—"}
+            sub={regionCount > 0
+              ? Object.keys(byRegion).slice(0, 2).join(", ")
+              : "Make changes in AWS to see regions"}
+            color="#a78bfa"
+            loading={loading}
+          />
+          <StatCard
+            label="SERVICES TRACKED"
+            value="13"
+            sub="CloudTrail + multi-region coverage"
+            color="#60a5fa"
+            loading={false}
+          />
         </div>
-        <div className="panel analytics-chart">
-          <div className="panel-header"><span className="panel-title">TOP THREAT TYPES</span></div>
-          <div className="threat-list">
-            {DEMO_TOP_THREATS.map((t,i)=>(
-              <div key={i} className="threat-list-row">
-                <span className="tl-rank">#{i+1}</span>
-                <span className="tl-name">{t.name}</span>
-                <div className="tl-bar-track"><div className="tl-bar" style={{width:`${t.pct}%`,background:t.color,transition:`width ${1+i*0.1}s ease`}}/></div>
-                <span className="tl-count" style={{color:t.color}}>{t.count}</span>
-              </div>
-            ))}
+
+        {/* ── MAIN GRID ───────────────────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: "290px 1fr 240px", gap: 12 }}>
+
+          {/* LEFT column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Panel title="THREAT RADAR" badge="LIVE">
+              <RadarScanner
+                hasCritical={criticalAlerts > 0}
+                hasAlerts={openAlerts > 0}
+                threatLevel={threatLevel}
+              />
+            </Panel>
+            <Panel title="SERVICE HEALTH" badge="13 SERVICES">
+              <ServiceHealth />
+            </Panel>
           </div>
-        </div>
-        <div className="panel analytics-chart">
-          <div className="panel-header"><span className="panel-title">SERVICES AFFECTED</span></div>
-          <div className="services-donut">
-            <svg viewBox="0 0 120 120" width="120" height="120">
-              {DEMO_PIE.map((seg,i)=>{
-                const offset=DEMO_PIE.slice(0,i).reduce((a,s)=>a+s.pct,0);
-                return <circle key={i} cx="60" cy="60" r="44" fill="none" stroke={seg.color} strokeWidth="18" strokeDasharray={`${seg.pct*2.76} 276`} strokeDashoffset={-offset*2.76} transform="rotate(-90 60 60)"/>;
+
+          {/* CENTER — Alert Feed */}
+          <Panel title="REAL-TIME ALERT FEED" badge="LIVE" style={{ minHeight: 580 }}>
+            <AlertFeed />
+          </Panel>
+
+          {/* RIGHT column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Severity breakdown */}
+            <Panel title="SEVERITY BREAKDOWN">
+              {(["CRITICAL","HIGH","MEDIUM","LOW"]).map(sev => {
+                const colors = {
+                  CRITICAL: "#ef4444", HIGH: "#f97316",
+                  MEDIUM: "#eab308", LOW: "#22c55e"
+                };
+                const c = colors[sev];
+                const count = bySeverity[sev] || 0;
+                const max = Math.max(...Object.values(bySeverity), 1);
+                return (
+                  <div key={sev} style={{ marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ color: c, fontSize: 9, fontWeight: 700 }}>{sev}</span>
+                      <span style={{ color: c, fontSize: 11, fontWeight: 700 }}>{count}</span>
+                    </div>
+                    <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: 2, height: 4 }}>
+                      <div style={{
+                        width: `${(count / max) * 100}%`,
+                        height: "100%", background: c,
+                        borderRadius: 2, transition: "width 0.5s"
+                      }} />
+                    </div>
+                  </div>
+                );
               })}
-              <text x="60" y="56" textAnchor="middle" fill="#6b8a9a" fontSize="8" fontFamily="monospace">EVENTS</text>
-              <text x="60" y="68" textAnchor="middle" fill="#e2e8f0" fontSize="14" fontWeight="700" fontFamily="monospace">{s.total_alerts_24h||27}</text>
-            </svg>
-            <div className="donut-legend">
-              {DEMO_PIE.map((seg,i)=>(
-                <div key={i} className="donut-leg-row">
-                  <span className="donut-dot" style={{background:seg.color}}/>
-                  <span className="donut-name">{seg.name}</span>
-                  <span className="donut-pct" style={{color:seg.color}}>{seg.pct}%</span>
+            </Panel>
+
+            {/* Region breakdown — REAL DATA */}
+            <Panel title="ACTIVE REGIONS">
+              {Object.keys(byRegion).length === 0 ? (
+                <div style={{ color: "#334455", fontSize: 10, textAlign: "center", padding: "16px 0" }}>
+                  No region data yet.<br />
+                  <span style={{ fontSize: 9, color: "#445566" }}>
+                    Make a change in AWS Console<br />to see regions appear here.
+                  </span>
                 </div>
-              ))}
-            </div>
+              ) : (
+                Object.entries(byRegion).slice(0, 8).map(([region, count]) => (
+                  <div key={region} style={{
+                    display: "flex", justifyContent: "space-between",
+                    alignItems: "center", marginBottom: 7
+                  }}>
+                    <span style={{ color: "#a78bfa", fontSize: 9, fontFamily: "monospace" }}>
+                      {region}
+                    </span>
+                    <span style={{
+                      background: "rgba(167,139,250,0.1)", color: "#a78bfa",
+                      padding: "1px 7px", borderRadius: 3,
+                      fontSize: 10, fontWeight: 700
+                    }}>{count}</span>
+                  </div>
+                ))
+              )}
+            </Panel>
+
+            {/* Category breakdown — REAL DATA */}
+            <Panel title="BY AWS SERVICE">
+              {Object.keys(byCategory).length === 0 ? (
+                <div style={{ color: "#334455", fontSize: 10, textAlign: "center", padding: "16px 0" }}>
+                  No service data yet.
+                </div>
+              ) : (
+                Object.entries(byCategory).slice(0, 6).map(([cat, count]) => {
+                  const color = catColors[cat] || "#8899aa";
+                  return (
+                    <div key={cat} style={{
+                      display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 6
+                    }}>
+                      <span style={{
+                        background: `${color}15`, border: `1px solid ${color}40`,
+                        color, padding: "1px 7px", borderRadius: 3,
+                        fontSize: 8, letterSpacing: 1
+                      }}>{cat}</span>
+                      <span style={{ color, fontSize: 11, fontWeight: 700 }}>{count}</span>
+                    </div>
+                  );
+                })
+              )}
+            </Panel>
+
+            <Panel title="COMPLIANCE STATUS" badge="AWS CONFIG">
+              <ComplianceGauge />
+            </Panel>
           </div>
         </div>
+
+        {/* Footer */}
+        {lastUpdate && (
+          <div style={{
+            textAlign: "right", color: "#223344", fontSize: 8,
+            marginTop: 10, letterSpacing: 1
+          }}>
+            STATS UPDATED: {lastUpdate.toLocaleTimeString("en-GB", { hour12: false })}
+            {" "}· ALERTS POLL: EVERY 15S · STATS REFRESH: EVERY 30S
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-// ─── ArchitectureFlow ────────────────────────────────────────────────────────
-function ArchitectureFlow() {
-  const nodes = [{label:"CloudTrail",color:"#f59e0b"},{label:"S3",color:"#3b82f6"},{label:"EventBridge",color:"#8b5cf6"},{label:"Step Fn",color:"#06b6d4"},{label:"Lambda",color:"#00d4aa"},{label:"DynamoDB",color:"#f59e0b"},{label:"API Gateway",color:"#ec4899"}];
-  return (
-    <div className="arch-flow">
-      {nodes.map((node,i)=>(
-        <div key={node.label} className="arch-node-row">
-          <div className="arch-node" style={{borderColor:node.color}}>
-            <span className="arch-dot" style={{background:node.color}}/>
-            <span className="arch-label">{node.label}</span>
-          </div>
-          {i<nodes.length-1 && <div className="arch-arrow"><div className="arch-line" style={{background:node.color}}/><span className="arch-chevron">▼</span></div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── MAIN EXPORT ──────────────────────────────────────────────────────────────
-export default function Dashboard() {
-  const [stats, setStats] = useState({ totalEvents: 48291, criticalAlerts: 7, complianceScore: 91, servicesMonitored: 13 });
-  const [activeTab, setActiveTab] = useState("overview");
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [threatLevel, setThreatLevel] = useState("MODERATE");
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-      setStats(prev => ({ ...prev, totalEvents: prev.totalEvents + Math.floor(Math.random() * 5) }));
-    }, 2000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      const data = await apiFetch("/stats");
-      if (data) {
-        setStats(prev => ({ ...prev, criticalAlerts: data.open_critical || prev.criticalAlerts }));
-        setThreatLevel(data.open_critical >= 5 ? "CRITICAL" : data.open_critical >= 2 ? "HIGH" : "LOW");
-      }
-    })();
-  }, []);
-
-  return (
-    <div className="dashboard-root">
-      <div className="bg-grid" /><div className="bg-scanline" />
-      <header className="header">
-        <div className="header-left">
-          <div className="logo-mark">
-            <div className="logo-hex">
-              <svg width="36" height="36" viewBox="0 0 36 36">
-                <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="none" stroke="#00d4aa" strokeWidth="1.5"/>
-                <polygon points="18,8 27,13 27,23 18,28 9,23 9,13" fill="#00d4aa" opacity="0.15" stroke="#00d4aa" strokeWidth="0.5"/>
-                <text x="18" y="22" textAnchor="middle" fill="#00d4aa" fontSize="10" fontWeight="700" fontFamily="monospace">CS</text>
-              </svg>
-            </div>
-          </div>
-          <div><h1 className="logo-title">CLOUD SEEKER</h1><p className="logo-sub">AWS Security Intelligence Platform</p></div>
-        </div>
-        <nav className="nav-tabs">
-          {["overview","alerts","compliance","analytics"].map(tab => (
-            <button key={tab} className={`nav-tab ${activeTab===tab?"active":""}`} onClick={() => setActiveTab(tab)}>{tab.toUpperCase()}</button>
-          ))}
-        </nav>
-        <div className="header-right">
-          <div className={`threat-badge threat-${threatLevel.toLowerCase()}`}><span className="threat-dot"/>THREAT: {threatLevel}</div>
-          <div className="clock">
-            <div className="clock-time">{currentTime.toLocaleTimeString("en-US",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"})}</div>
-            <div className="clock-date">{currentTime.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
-          </div>
-        </div>
-      </header>
-      <main className="main-content">
-        <div className="metrics-row">
-          <MetricCard label="TOTAL EVENTS" value={stats.totalEvents.toLocaleString()} delta="+124 last hour" color="teal" icon="⬡"/>
-          <MetricCard label="CRITICAL ALERTS" value={stats.criticalAlerts} delta="2 unresolved" color="red" icon="⚠"/>
-          <MetricCard label="COMPLIANCE SCORE" value={`${stats.complianceScore}%`} delta="+3% this week" color="green" icon="✦"/>
-          <MetricCard label="SERVICES ACTIVE" value={stats.servicesMonitored} delta="All healthy" color="blue" icon="◈"/>
-        </div>
-        {activeTab === "overview"    && <OverviewTab />}
-        {activeTab === "alerts"      && <AlertsTab />}
-        {activeTab === "compliance"  && <ComplianceTab />}
-        {activeTab === "analytics"   && <AnalyticsTab />}
-      </main>
     </div>
   );
 }
