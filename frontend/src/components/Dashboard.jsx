@@ -1,9 +1,9 @@
 /**
- * Cloud Seeker — Enterprise Dashboard (Complete Redesign)
- * Clean, professional, Linear/Vercel style. No neon, no glow.
- * All 4 tabs: Overview, Alerts, Compliance, Analytics
+ * Cloud Seeker — Enterprise Dashboard v8  COMPLETE + FIXED
+ * ─ Sidebar nav restored (was accidentally removed in logo update)
+ * ─ All 4 tabs: Overview, Alerts, Compliance, Analytics
+ * ─ New Cloud Seeker logo
  */
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNotifications } from "./NotificationManager";
 
@@ -15,12 +15,11 @@ const fmtTime = (iso) => {
   try { return new Date(iso).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" }); }
   catch { return "—"; }
 };
-
 const fmtFullTime = () =>
   new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-// ── SVG Icons ─────────────────────────────────────────────────────────────────
-const Icon = {
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const I = {
   Grid: () => <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>,
   Bell: () => <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>,
   Shield: () => <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
@@ -34,17 +33,59 @@ const Icon = {
   Server: () => <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>,
 };
 
-// ── Severity Badge ────────────────────────────────────────────────────────────
+// ── Cloud Seeker brand logo SVG ────────────────────────────────────────────────
+function CloudSeekerLogo({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" style={{ flexShrink: 0 }}>
+      <defs>
+        <linearGradient id="csBlue" x1="0" y1="36" x2="36" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#0D47A1" />
+          <stop offset="50%" stopColor="#0288D1" />
+          <stop offset="100%" stopColor="#00BCD4" />
+        </linearGradient>
+        <linearGradient id="csArrow" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#FF6D00" />
+          <stop offset="100%" stopColor="#FFD600" />
+        </linearGradient>
+      </defs>
+      {/* Cloud outline */}
+      <path
+        d="M8.5 26C5.5 26 3 23.6 3 20.5C3 17.8 5 15.6 7.6 15.1C7.5 14.8 7.5 14.4 7.5 14
+           C7.5 11.0 10.0 8.5 13.0 8.5C13.9 8.5 14.8 8.7 15.6 9.2
+           C16.8 6.9 19.2 5.3 22.0 5.3C26.4 5.3 30 8.9 30 13.3
+           C30 13.5 30 13.7 29.9 13.9C31.7 14.6 33 16.4 33 18.5
+           C33 21.5 30.6 24 27.5 24.2L27 26H8.5Z"
+        stroke="url(#csBlue)" strokeWidth="1.4" fill="rgba(0,188,212,0.07)"
+      />
+      {/* Network nodes */}
+      <circle cx="11" cy="19" r="1.8" fill="url(#csBlue)" />
+      <circle cx="19" cy="13" r="1.8" fill="url(#csBlue)" />
+      <circle cx="27" cy="16" r="1.8" fill="url(#csBlue)" />
+      <circle cx="22" cy="22" r="1.8" fill="url(#csBlue)" />
+      {/* Network edges */}
+      <line x1="11" y1="19" x2="19" y2="13" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
+      <line x1="19" y1="13" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
+      <line x1="27" y1="16" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
+      <line x1="22" y1="22" x2="11" y2="19" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
+      <line x1="11" y1="19" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.38" />
+      <line x1="19" y1="13" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.38" />
+      {/* Arrow */}
+      <line x1="9" y1="30" x2="26" y2="10" stroke="url(#csArrow)" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M23 8.5L28 9L27.5 14" stroke="url(#csArrow)" strokeWidth="2.0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── Severity badge ─────────────────────────────────────────────────────────────
 function Badge({ severity }) {
   return (
     <span className={`badge badge-${severity}`}>
-      <span className="badge-dot" />
-      {severity}
+      <span className="badge-dot" />{severity}
     </span>
   );
 }
 
-// ── Donut Chart ───────────────────────────────────────────────────────────────
+// ── Donut chart ────────────────────────────────────────────────────────────────
 function DonutChart({ bySeverity }) {
   const segs = [
     { key: "CRITICAL", color: "#EF4444" },
@@ -54,7 +95,6 @@ function DonutChart({ bySeverity }) {
   ];
   const total = Object.values(bySeverity).reduce((s, v) => s + v, 0) || 1;
   let offset = 25;
-
   return (
     <div className="donut-wrap">
       <svg width="100" height="100" viewBox="0 0 36 36">
@@ -86,36 +126,35 @@ function DonutChart({ bySeverity }) {
   );
 }
 
-// ── Region Bars ───────────────────────────────────────────────────────────────
+// ── Region bars ────────────────────────────────────────────────────────────────
 function RegionBars({ byRegion }) {
-  const colors = { "eu-north-1": "#4F46E5", "us-east-1": "#6366F1", "us-west-2": "#22C55E", "eu-west-1": "#F59E0B", "ap-southeast-1": "#EC4899" };
-  const entries = Object.entries(byRegion);
+  const COLORS = {
+    "eu-north-1": "#4F46E5", "us-east-1": "#6366F1", "us-west-2": "#22C55E",
+    "eu-west-1": "#F59E0B", "ap-southeast-1": "#EC4899", "eu-central-1": "#06B6D4",
+    "ap-south-1": "#8B5CF6", "us-east-2": "#10B981",
+  };
+  const entries = Object.entries(byRegion).sort((a, b) => b[1] - a[1]);
   const max = Math.max(...entries.map(([, v]) => v), 1);
   const [animated, setAnimated] = useState(false);
-  useEffect(() => { setTimeout(() => setAnimated(true), 100); }, []);
-
+  useEffect(() => { const t = setTimeout(() => setAnimated(true), 100); return () => clearTimeout(t); }, []);
   if (!entries.length) return <div className="empty-state"><div className="empty-state-text">No region data yet</div></div>;
   return (
     <div className="bar-group">
-      {entries.slice(0, 6).map(([r, c]) => {
-        const color = colors[r] || "#6366F1";
-        const pct = (c / max) * 100;
-        return (
-          <div key={r} className="bar-row">
-            <div className="bar-label">{r}</div>
-            <div className="bar-track">
-              <div className="bar-fill" style={{ width: animated ? `${pct}%` : "0%", background: color }} />
-            </div>
-            <div className="bar-count">{c}</div>
+      {entries.slice(0, 6).map(([r, c]) => (
+        <div key={r} className="bar-row">
+          <div className="bar-label">{r}</div>
+          <div className="bar-track">
+            <div className="bar-fill" style={{ width: animated ? `${(c / max) * 100}%` : "0%", background: COLORS[r] || "#6366F1" }} />
           </div>
-        );
-      })}
+          <div className="bar-count">{c}</div>
+        </div>
+      ))}
     </div>
   );
 }
 
-// ── Compliance Bars ───────────────────────────────────────────────────────────
-const COMPLIANCE_RULES = [
+// ── Compliance frameworks ─────────────────────────────────────────────────────
+const COMPLIANCE_FRAMEWORKS = [
   { name: "CIS AWS Benchmark", icon: "🏛️", score: 94, color: "#4F46E5" },
   { name: "PCI DSS", icon: "💳", score: 87, color: "#F59E0B" },
   { name: "SOC 2", icon: "✅", score: 96, color: "#22C55E" },
@@ -124,14 +163,14 @@ const COMPLIANCE_RULES = [
   { name: "AWS Well-Architected", icon: "☁️", score: 92, color: "#6366F1" },
 ];
 
-// ── Detection Pipeline ────────────────────────────────────────────────────────
+// ── Detection pipeline ─────────────────────────────────────────────────────────
 const PIPELINE = [
-  { icon: "🖥️", name: "AWS Action", desc: "Console or API change" },
+  { icon: "🖥️", name: "AWS Action", desc: "Console / API change" },
   { icon: "📋", name: "CloudTrail", desc: "Records every API call" },
   { icon: "⚡", name: "EventBridge", desc: "Detects in ~30s" },
   { icon: "λ", name: "Lambda", desc: "Analyzes threat level" },
   { icon: "🗄️", name: "DynamoDB", desc: "Stores alert record" },
-  { icon: "📧", name: "SNS Email", desc: "Gmail notification" },
+  { icon: "📧", name: "SNS Email", desc: "Sends to Gmail" },
   { icon: "📊", name: "Dashboard", desc: "Real-time view" },
 ];
 
@@ -148,11 +187,11 @@ export default function Dashboard() {
   const [filter, setFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(new Set());
-  const [compAnimated, setCompAnim] = useState(false);
-  const [threatLevel, setThreatLevel] = useState("LOW");
+  const [compAnim, setCompAnim] = useState(false);
+  const [threatLevel, setThreat] = useState("LOW");
   const seenIds = useRef(new Set());
 
-  // Clock
+  // Live clock
   useEffect(() => {
     const t = setInterval(() => setClock(fmtFullTime()), 1000);
     return () => clearInterval(t);
@@ -160,27 +199,32 @@ export default function Dashboard() {
 
   // Fetch stats
   const fetchStats = useCallback(async () => {
-    if (!API) { setStats({ totalAlerts: 54, openAlerts: 50, lastHourAlerts: 6, criticalAlerts: 4, highAlerts: 20, bySeverity: { CRITICAL: 4, HIGH: 20, MEDIUM: 6, LOW: 24 }, byRegion: { "eu-north-1": 54 } }); return; }
-    try { const r = await fetch(`${API}/stats`); const d = await r.json(); setStats(d); } catch { }
+    if (!API) {
+      setStats({ totalAlerts: 10, openAlerts: 10, lastHourAlerts: 6, criticalAlerts: 2, highAlerts: 2, bySeverity: { CRITICAL: 2, HIGH: 2, MEDIUM: 2, LOW: 4 }, byRegion: { "eu-north-1": 10 } });
+      return;
+    }
+    try { const r = await fetch(`${API}/stats`); if (r.ok) setStats(await r.json()); } catch { }
   }, []);
 
-  // Fetch alerts + fire notifications for new ones
+  // Fetch alerts
   const fetchAlerts = useCallback(async () => {
     let items = [];
     if (!API) {
       items = [
-        { alert_id: "1", event_name: "AuthorizeSecurityGroupIngress", reason: "SG sg-060be7 opened to world (0.0.0.0/0) port any", severity: "CRITICAL", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "arn:aws:iam::382334304729:user/Jithu", source_ip: "103.42.196.77", created_at: new Date().toISOString(), status: "OPEN" },
-        { alert_id: "2", event_name: "TerminateInstances", reason: "EC2 instance(s) TERMINATED in eu-north-1", severity: "HIGH", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 300000).toISOString(), status: "OPEN" },
-        { alert_id: "3", event_name: "RunInstances", reason: "EC2 t3.micro launched by Jithu", severity: "HIGH", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 600000).toISOString(), status: "OPEN" },
-        { alert_id: "4", event_name: "PutBucketPolicy", reason: "S3 bucket policy changed", severity: "HIGH", event_source: "s3.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 900000).toISOString(), status: "OPEN" },
-        { alert_id: "5", event_name: "UpdateTrail", reason: "CloudTrail configuration changed", severity: "MEDIUM", event_source: "cloudtrail.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1200000).toISOString(), status: "OPEN" },
-        { alert_id: "6", event_name: "UpdateFunctionCode", reason: "'UpdateFunctionCode' on LAMBDA by Jithu", severity: "LOW", event_source: "lambda.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1500000).toISOString(), status: "OPEN" },
+        { alert_id: "d1", event_name: "AuthorizeSecurityGroupIngress", reason: "SG opened to ENTIRE INTERNET (0.0.0.0/0) port 22", severity: "CRITICAL", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date().toISOString(), status: "OPEN" },
+        { alert_id: "d2", event_name: "TerminateInstances", reason: "EC2 instance(s) TERMINATED in eu-north-1", severity: "HIGH", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 300000).toISOString(), status: "OPEN" },
+        { alert_id: "d3", event_name: "RunInstances", reason: "EC2 t3.micro launched by Jithu in eu-north-1", severity: "HIGH", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 600000).toISOString(), status: "OPEN" },
+        { alert_id: "d4", event_name: "PutBucketPolicy", reason: "S3 bucket policy changed by Jithu", severity: "HIGH", event_source: "s3.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 900000).toISOString(), status: "OPEN" },
+        { alert_id: "d5", event_name: "UpdateTrail", reason: "CloudTrail configuration changed by Jithu", severity: "MEDIUM", event_source: "cloudtrail.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1200000).toISOString(), status: "OPEN" },
+        { alert_id: "d6", event_name: "CreateAccessKey", reason: "New access key created for Jithu", severity: "MEDIUM", event_source: "iam.amazonaws.com", region: "global", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1500000).toISOString(), status: "OPEN" },
       ];
     } else {
-      try { const r = await fetch(`${API}/alerts?limit=100&status=OPEN`); const d = await r.json(); items = d.alerts || []; } catch { }
+      try {
+        const r = await fetch(`${API}/alerts?limit=100&status=OPEN`);
+        if (r.ok) { const d = await r.json(); items = d.alerts || []; }
+      } catch { }
     }
     items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    // Notify new ones
     items.forEach(a => {
       if (!seenIds.current.has(a.alert_id)) {
         addNotification({ severity: a.severity, title: a.event_name, detail: a.reason, region: a.region, user: a.user?.split("/").pop() });
@@ -189,21 +233,17 @@ export default function Dashboard() {
     });
     setAllAlerts(items);
     setLoading(false);
-
-    // Update threat level
     const crit = items.filter(a => a.severity === "CRITICAL").length;
     const high = items.filter(a => a.severity === "HIGH").length;
-    if (crit > 0) setThreatLevel("CRITICAL");
-    else if (high > 0) setThreatLevel("HIGH");
-    else setThreatLevel("LOW");
+    setThreat(crit > 0 ? "CRITICAL" : high > 0 ? "HIGH" : "LOW");
   }, [addNotification]);
 
   useEffect(() => {
     fetchStats();
     fetchAlerts();
-    const s = setInterval(fetchStats, 60_000);
-    const a = setInterval(fetchAlerts, 15_000);
-    return () => { clearInterval(s); clearInterval(a); };
+    const si = setInterval(fetchStats, 60_000);
+    const ai = setInterval(fetchAlerts, 15_000);
+    return () => { clearInterval(si); clearInterval(ai); };
   }, [fetchStats, fetchAlerts]);
 
   const resolveAlert = async (id) => {
@@ -213,96 +253,94 @@ export default function Dashboard() {
     setResolving(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
-  // Counts
   const counts = { ALL: allAlerts.length, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   allAlerts.forEach(a => { if (counts[a.severity] !== undefined) counts[a.severity]++; });
   const filtered = filter === "ALL" ? allAlerts : allAlerts.filter(a => a.severity === filter);
 
-  const threatChipClass = threatLevel === "CRITICAL" ? "status-crit" : threatLevel === "HIGH" ? "status-warn" : "status-ok";
-  const threatChipLabel = threatLevel === "CRITICAL" ? "Threat: Critical" : threatLevel === "HIGH" ? "Threat: High" : "All Clear";
+  const threatClass = threatLevel === "CRITICAL" ? "status-crit" : threatLevel === "HIGH" ? "status-warn" : "status-ok";
+  const threatLabel = threatLevel === "CRITICAL" ? "Threat: Critical" : threatLevel === "HIGH" ? "Threat: High" : "All Clear";
 
-  // Page meta
-  const pages = {
+  const PAGE_META = {
     overview: ["Cloud Security Overview", "Real-time monitoring of your AWS environment"],
     alerts: ["Security Alerts", "Manage and respond to security events"],
     compliance: ["Compliance Overview", "Security framework compliance status"],
     analytics: ["Security Analytics", "Activity trends and environment insights"],
   };
-  const [pageTitle, pageSub] = pages[tab];
+  const [pageTitle, pageSub] = PAGE_META[tab];
 
-  const handleTabChange = (t) => {
+  const switchTab = (t) => {
     setTab(t);
-    if (t === "compliance") setTimeout(() => setCompAnim(true), 100);
+    setFilter("ALL");
+    if (t === "compliance") setTimeout(() => setCompAnim(true), 120);
+    else setCompAnim(false);
   };
+
+  // ── NAV items ────────────────────────────────────────────────────────────────
+  const NAV = [
+    { id: "overview", label: "Overview", icon: <I.Grid />, badge: null },
+    { id: "alerts", label: "Alerts", icon: <I.Bell />, badge: counts.ALL || null },
+    { id: "compliance", label: "Compliance", icon: <I.Shield />, badge: null },
+    { id: "analytics", label: "Analytics", icon: <I.Chart />, badge: null },
+  ];
 
   return (
     <div className="app-layout">
 
-      {/* ── SIDEBAR ────────────────────────────────────────────────────────── */}
+      {/* ═══════════════════════════════════════════════════════════
+          SIDEBAR — logo + nav + footer
+      ═══════════════════════════════════════════════════════════ */}
       <aside className="sidebar">
+
+        {/* Logo */}
         <div className="sb-logo">
-          {/* Cloud Seeker Logo — matches the provided brand image exactly */}
-          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
-            <defs>
-              <linearGradient id="csBlue" x1="0" y1="36" x2="36" y2="0" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#0D47A1" />
-                <stop offset="50%" stopColor="#0288D1" />
-                <stop offset="100%" stopColor="#00BCD4" />
-              </linearGradient>
-              <linearGradient id="csArrow" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#FF6D00" />
-                <stop offset="100%" stopColor="#FFD600" />
-              </linearGradient>
-            </defs>
-
-            {/* Cloud outline — main silhouette */}
-            <path
-              d="M8.5 26C5.5 26 3 23.6 3 20.5C3 17.8 5 15.6 7.6 15.1C7.5 14.8 7.5 14.4 7.5 14
-         C7.5 11.0 10.0 8.5 13.0 8.5C13.9 8.5 14.8 8.7 15.6 9.2
-         C16.8 6.9 19.2 5.3 22.0 5.3C26.4 5.3 30 8.9 30 13.3
-         C30 13.5 30 13.7 29.9 13.9
-         C31.7 14.6 33 16.4 33 18.5
-         C33 21.5 30.6 24 27.5 24.2L27 26H8.5Z"
-              stroke="url(#csBlue)"
-              strokeWidth="1.4"
-              fill="rgba(0,188,212,0.07)"
-            />
-
-            {/* Network nodes — 4 points forming a quad */}
-            <circle cx="11" cy="19" r="1.8" fill="url(#csBlue)" />
-            <circle cx="19" cy="13" r="1.8" fill="url(#csBlue)" />
-            <circle cx="27" cy="16" r="1.8" fill="url(#csBlue)" />
-            <circle cx="22" cy="22" r="1.8" fill="url(#csBlue)" />
-
-            {/* Network edges */}
-            <line x1="11" y1="19" x2="19" y2="13" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
-            <line x1="19" y1="13" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
-            <line x1="27" y1="16" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
-            <line x1="22" y1="22" x2="11" y2="19" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
-            {/* Cross-diagonals */}
-            <line x1="11" y1="19" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.40" />
-            <line x1="19" y1="13" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.40" />
-
-            {/* Arrow — diagonal up-right, orange/amber like logo */}
-            <line x1="9" y1="30" x2="26" y2="10" stroke="url(#csArrow)" strokeWidth="2.2" strokeLinecap="round" />
-            {/* Arrowhead */}
-            <path
-              d="M23 8.5L28 9L27.5 14"
-              stroke="url(#csArrow)"
-              strokeWidth="2.0"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-
+          <CloudSeekerLogo size={36} />
           <div className="sb-logo-text">
-            <h1 style={{ fontWeight: 700, letterSpacing: "0.04em" }}>CLOUD SEEKER</h1>
+            <h1>CLOUD SEEKER</h1>
             <p>Security Intelligence Platform</p>
+          </div>
+        </div>
+
+        {/* ── NAVIGATION — THIS WAS THE MISSING PIECE ── */}
+        <div className="sb-nav">
+          <div className="sb-section">Main</div>
+          {NAV.map(item => (
+            <div
+              key={item.id}
+              className={`nav-item${tab === item.id ? " active" : ""}`}
+              onClick={() => switchTab(item.id)}
+            >
+              {item.icon}
+              {item.label}
+              {item.badge != null && item.badge > 0 && (
+                <span className="nav-badge">{item.badge}</span>
+              )}
+            </div>
+          ))}
+
+          <div className="sb-section" style={{ marginTop: 16 }}>System</div>
+          <div className="nav-item" onClick={() => window.open("https://console.aws.amazon.com", "_blank")}>
+            <I.Link />AWS Console
+          </div>
+          <div className="nav-item" style={{ cursor: "default", opacity: 0.5 }}>
+            <I.Gear />Settings
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="sb-footer">
+          <div className="env-pill">
+            <div className="env-dot" />
+            <div>
+              <div className="env-label">AWS Connected</div>
+              <div className="env-sub">eu-north-1 · prod</div>
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* ── MAIN ───────────────────────────────────────────────────────────── */}
+      {/* ═══════════════════════════════════════════════════════════
+          MAIN AREA
+      ═══════════════════════════════════════════════════════════ */}
       <div className="main-area">
 
         {/* Topbar */}
@@ -312,38 +350,37 @@ export default function Dashboard() {
             <p>{pageSub}</p>
           </div>
           <div className="topbar-right">
-            <div className={`status-chip ${threatChipClass}`}>
+            <div className={`status-chip ${threatClass}`}>
               <span className="status-pulse" />
-              {threatChipLabel}
+              {threatLabel}
             </div>
             <div className="clock-chip">{clock}</div>
             <button className="icon-btn" onClick={() => { fetchStats(); fetchAlerts(); }} title="Refresh">
-              <Icon.Refresh />
+              <I.Refresh />
             </button>
           </div>
         </header>
 
-        {/* ── OVERVIEW TAB ─────────────────────────────────────────────────── */}
+        {/* ═══════════ OVERVIEW TAB ═══════════ */}
         {tab === "overview" && (
           <div className="content-area">
+            {/* KPI row */}
             <div className="kpi-grid">
               <div className="kpi-card">
                 <div className="kpi-top">
                   <span className="kpi-label">Total Events</span>
                   <div className="kpi-icon" style={{ background: "var(--indigo-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><Icon.Pulse /></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Pulse /></svg>
                   </div>
                 </div>
-                <div className="kpi-value">{(stats?.totalAlerts ?? "—").toLocaleString()}</div>
-                <div className={`kpi-trend ${stats ? "trend-up" : "trend-mute"}`}>
-                  +{stats?.lastHourAlerts ?? 0} last hour
-                </div>
+                <div className="kpi-value">{stats?.totalAlerts?.toLocaleString() ?? "—"}</div>
+                <div className={`kpi-trend ${stats ? "trend-up" : "trend-mute"}`}>+{stats?.lastHourAlerts ?? 0} last hour</div>
               </div>
               <div className="kpi-card">
                 <div className="kpi-top">
                   <span className="kpi-label">Active Alerts</span>
                   <div className="kpi-icon" style={{ background: "var(--danger-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><Icon.Alert /></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Alert /></svg>
                   </div>
                 </div>
                 <div className="kpi-value" style={{ color: "var(--danger)" }}>{stats?.openAlerts ?? "—"}</div>
@@ -353,7 +390,7 @@ export default function Dashboard() {
                 <div className="kpi-top">
                   <span className="kpi-label">Compliance Score</span>
                   <div className="kpi-icon" style={{ background: "var(--success-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><Icon.Check /></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Check /></svg>
                   </div>
                 </div>
                 <div className="kpi-value" style={{ color: "var(--success)" }}>91%</div>
@@ -363,7 +400,7 @@ export default function Dashboard() {
                 <div className="kpi-top">
                   <span className="kpi-label">Services Monitored</span>
                   <div className="kpi-icon" style={{ background: "rgba(99,102,241,.08)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><Icon.Server /></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Server /></svg>
                   </div>
                 </div>
                 <div className="kpi-value" style={{ color: "#6366F1" }}>13</div>
@@ -371,6 +408,7 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Status row */}
             <div className="status-grid">
               <div className="status-card">
                 <div className="status-card-head">
@@ -401,39 +439,35 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Recent activity table */}
             <div className="card">
               <div className="card-header">
                 <div>
                   <div className="card-title">Recent Activity</div>
                   <div className="card-sub">Latest security events across your AWS environment</div>
                 </div>
-                <span style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--mono)" }}>
-                  {allAlerts.length} events
-                </span>
+                <span style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--mono)" }}>{allAlerts.length} events</span>
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table className="data-table">
                   <thead>
-                    <tr>
-                      <th>Event</th>
-                      <th>Service</th>
-                      <th>Region</th>
-                      <th>Severity</th>
-                      <th>User</th>
-                      <th>Time</th>
-                    </tr>
+                    <tr><th>Event</th><th>Service</th><th>Region</th><th>Severity</th><th>User</th><th>Time</th></tr>
                   </thead>
                   <tbody>
-                    {loading ? (
+                    {loading && (
                       <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--t3)", padding: 24 }}>Loading events...</td></tr>
-                    ) : allAlerts.slice(0, 8).map(a => {
+                    )}
+                    {!loading && allAlerts.length === 0 && (
+                      <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--t3)", padding: 24 }}>No events found — system is clean ✓</td></tr>
+                    )}
+                    {!loading && allAlerts.slice(0, 8).map(a => {
                       const svc = (a.event_source || "").replace(".amazonaws.com", "");
                       const user = (a.user || "").split("/").pop();
                       return (
                         <tr key={a.alert_id}>
                           <td>
                             <div className="td-primary">{a.event_name}</div>
-                            <div className="td-secondary">{(a.reason || "").slice(0, 50)}{(a.reason?.length || 0) > 50 ? "…" : ""}</div>
+                            <div className="td-secondary">{(a.reason || "").slice(0, 52)}{(a.reason?.length || 0) > 52 ? "…" : ""}</div>
                           </td>
                           <td className="td-mono">{svc || "AWS"}</td>
                           <td className="td-mono">{a.region || "—"}</td>
@@ -443,9 +477,6 @@ export default function Dashboard() {
                         </tr>
                       );
                     })}
-                    {!loading && allAlerts.length === 0 && (
-                      <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--t3)", padding: 24 }}>No events found</td></tr>
-                    )}
                   </tbody>
                 </table>
               </div>
@@ -453,14 +484,14 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ── ALERTS TAB ───────────────────────────────────────────────────── */}
+        {/* ═══════════ ALERTS TAB ═══════════ */}
         {tab === "alerts" && (
           <div className="content-area">
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>Security Alerts</div>
               <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
                 {filtered.length} {filter === "ALL" ? "open" : filter.toLowerCase()} alerts
-                {allAlerts.length > 0 && ` · Last updated ${fmtTime(new Date().toISOString())}`}
+                {allAlerts.length > 0 && ` · refreshes every 15 s`}
               </div>
             </div>
 
@@ -470,19 +501,19 @@ export default function Dashboard() {
                   {f} <span className="filter-count">{counts[f]}</span>
                 </button>
               ))}
-              <button className="action-btn" onClick={fetchAlerts} style={{ marginLeft: "auto" }}>
-                <Icon.Refresh />Refresh
+              <button className="action-btn" style={{ marginLeft: "auto" }} onClick={fetchAlerts}>
+                <I.Refresh />Refresh
               </button>
             </div>
 
             <div className="alert-list">
               {loading && (
-                <div className="empty-state"><div className="empty-state-icon">⏳</div><div className="empty-state-text">Loading alerts...</div></div>
+                <div className="empty-state"><div className="empty-state-icon">⏳</div><div className="empty-state-text">Loading alerts…</div></div>
               )}
               {!loading && filtered.length === 0 && (
                 <div className="empty-state">
-                  <div className="empty-state-icon">✓</div>
-                  <div className="empty-state-text">No {filter === "ALL" ? "" : filter + " "}alerts found</div>
+                  <div className="empty-state-icon" style={{ opacity: 1, fontSize: 32 }}>✓</div>
+                  <div className="empty-state-text" style={{ color: "var(--success)" }}>No {filter === "ALL" ? "" : filter + " "}alerts</div>
                   <div className="empty-state-sub">Your environment looks clean</div>
                 </div>
               )}
@@ -496,8 +527,7 @@ export default function Dashboard() {
                       <div className="alert-title">{alert.event_name}</div>
                       <div className="alert-actions">
                         <Badge severity={alert.severity} />
-                        <button className="resolve-btn" disabled={isRes}
-                          onClick={() => resolveAlert(alert.alert_id)}>
+                        <button className="resolve-btn" disabled={isRes} onClick={() => resolveAlert(alert.alert_id)}>
                           {isRes ? "Resolving…" : "Resolve"}
                         </button>
                       </div>
@@ -519,28 +549,71 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ── COMPLIANCE TAB ───────────────────────────────────────────────── */}
+        {/* ═══════════ COMPLIANCE TAB ═══════════ */}
         {tab === "compliance" && (
           <div className="content-area">
-            <div style={{ marginBottom: 20 }}>
+            {/* Page header */}
+            <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>Compliance Overview</div>
-              <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>Security framework compliance across your AWS environment</div>
+              <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
+                Security framework compliance across your AWS environment
+              </div>
             </div>
+
+            {/* Overall score banner */}
+            <div style={{
+              background: "linear-gradient(135deg,rgba(79,70,229,.08),rgba(34,197,94,.06))",
+              border: "1px solid rgba(79,70,229,.2)", borderRadius: "var(--r)",
+              padding: "20px 24px", marginBottom: 16,
+              display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap",
+            }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 48, fontWeight: 700, fontFamily: "var(--mono)", color: "#22C55E", lineHeight: 1 }}>91%</div>
+                <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4, letterSpacing: "0.06em" }}>OVERALL SCORE</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--t1)", marginBottom: 6 }}>
+                  AWS Security Posture
+                </div>
+                <div style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.6 }}>
+                  Compliance tracked across {COMPLIANCE_FRAMEWORKS.length} security frameworks.
+                  {" "}{COMPLIANCE_FRAMEWORKS.filter(f => f.score >= 90).length} frameworks passing,{" "}
+                  {COMPLIANCE_FRAMEWORKS.filter(f => f.score >= 75 && f.score < 90).length} need attention.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                {[
+                  { n: COMPLIANCE_FRAMEWORKS.filter(f => f.score >= 90).length, label: "Passing", color: "var(--success)" },
+                  { n: COMPLIANCE_FRAMEWORKS.filter(f => f.score >= 75 && f.score < 90).length, label: "Warning", color: "var(--warn)" },
+                  { n: COMPLIANCE_FRAMEWORKS.filter(f => f.score < 75).length, label: "Failing", color: "var(--danger)" },
+                ].map(s => (
+                  <div key={s.label} style={{
+                    background: "rgba(255,255,255,.04)", border: "1px solid var(--border)",
+                    borderRadius: 8, padding: "10px 16px", textAlign: "center", minWidth: 70,
+                  }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--mono)", color: s.color }}>{s.n}</div>
+                    <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2, letterSpacing: "0.06em" }}>{s.label.toUpperCase()}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Framework cards */}
             <div className="comp-grid">
-              {COMPLIANCE_RULES.map(rule => {
-                const isPass = rule.score >= 90;
-                const isWarn = rule.score >= 75 && rule.score < 90;
+              {COMPLIANCE_FRAMEWORKS.map(fw => {
+                const isPass = fw.score >= 90;
+                const isWarn = fw.score >= 75 && fw.score < 90;
                 return (
-                  <div key={rule.name} className="comp-card">
-                    <div className="comp-icon" style={{ background: `${rule.color}10` }}>{rule.icon}</div>
+                  <div key={fw.name} className="comp-card">
+                    <div className="comp-icon" style={{ background: `${fw.color}18` }}>{fw.icon}</div>
                     <div className="comp-body">
-                      <div className="comp-name">{rule.name}</div>
+                      <div className="comp-name">{fw.name}</div>
                       <div className="comp-track">
-                        <div className="comp-fill" style={{ width: compAnimated ? `${rule.score}%` : "0%", background: rule.color }} />
+                        <div className="comp-fill" style={{ width: compAnim ? `${fw.score}%` : "0%", background: fw.color }} />
                       </div>
                     </div>
                     <div className="comp-right">
-                      <div className="comp-pct" style={{ color: rule.color }}>{rule.score}%</div>
+                      <div className="comp-pct" style={{ color: fw.color }}>{fw.score}%</div>
                       <div className={`comp-status ${isPass ? "comp-pass" : isWarn ? "comp-warn" : "comp-fail"}`}>
                         {isPass ? "PASSING" : isWarn ? "WARNING" : "FAILING"}
                       </div>
@@ -549,24 +622,10 @@ export default function Dashboard() {
                 );
               })}
             </div>
-            <div className="summary-grid">
-              <div className="summary-card">
-                <div className="summary-num" style={{ color: "var(--success)" }}>{COMPLIANCE_RULES.filter(r => r.score >= 90).length}</div>
-                <div className="summary-lbl">Passing</div>
-              </div>
-              <div className="summary-card">
-                <div className="summary-num" style={{ color: "var(--warn)" }}>{COMPLIANCE_RULES.filter(r => r.score >= 75 && r.score < 90).length}</div>
-                <div className="summary-lbl">Warning</div>
-              </div>
-              <div className="summary-card">
-                <div className="summary-num" style={{ color: "var(--t3)" }}>{COMPLIANCE_RULES.filter(r => r.score < 75).length}</div>
-                <div className="summary-lbl">Failing</div>
-              </div>
-            </div>
           </div>
         )}
 
-        {/* ── ANALYTICS TAB ────────────────────────────────────────────────── */}
+        {/* ═══════════ ANALYTICS TAB ═══════════ */}
         {tab === "analytics" && (
           <div className="content-area">
             <div style={{ marginBottom: 20 }}>
@@ -574,6 +633,7 @@ export default function Dashboard() {
               <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>Activity trends and threat insights</div>
             </div>
 
+            {/* Top charts */}
             <div className="two-col" style={{ marginBottom: 12 }}>
               <div className="card">
                 <div className="card-header">
@@ -585,48 +645,54 @@ export default function Dashboard() {
                 <div className="card-header">
                   <div><div className="card-title">Alert Breakdown</div><div className="card-sub">Distribution by severity</div></div>
                 </div>
-                <DonutChart bySeverity={stats?.bySeverity || { CRITICAL: 4, HIGH: 20, MEDIUM: 6, LOW: 24 }} />
+                <DonutChart bySeverity={stats?.bySeverity || { CRITICAL: 2, HIGH: 2, MEDIUM: 2, LOW: 4 }} />
               </div>
             </div>
 
+            {/* Severity numbers */}
             <div className="card" style={{ marginBottom: 12 }}>
               <div className="card-header">
                 <div><div className="card-title">Severity Summary</div><div className="card-sub">Alert counts by severity level</div></div>
               </div>
-              <div className="three-col">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
                 {[["CRITICAL", "#EF4444"], ["HIGH", "#F59E0B"], ["MEDIUM", "#6366F1"], ["LOW", "#22C55E"]].map(([sev, col]) => (
                   <div key={sev} style={{
                     background: `${col}08`, border: `1px solid ${col}20`,
                     borderRadius: 8, padding: "14px 16px", textAlign: "center",
                   }}>
-                    <div style={{ fontSize: 24, fontWeight: 600, fontFamily: "var(--mono)", color: col }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "var(--mono)", color: col }}>
                       {stats?.bySeverity?.[sev] ?? 0}
                     </div>
-                    <div style={{ fontSize: 9, fontWeight: 600, color: col, opacity: .8, letterSpacing: 1, marginTop: 3, textTransform: "uppercase" }}>{sev}</div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: col, opacity: .8, letterSpacing: 1, marginTop: 4, textTransform: "uppercase" }}>{sev}</div>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Detection pipeline */}
             <div className="card">
               <div className="card-header">
-                <div><div className="card-title">Detection Pipeline</div><div className="card-sub">How Cloud Seeker monitors your AWS environment in real time</div></div>
+                <div>
+                  <div className="card-title">Detection Pipeline</div>
+                  <div className="card-sub">How Cloud Seeker monitors your AWS environment in real time</div>
+                </div>
               </div>
               <div className="pipeline">
                 {PIPELINE.map((step, i) => (
-                  <>
-                    <div key={step.name} className="pipe-step">
+                  <span key={step.name} style={{ display: "contents" }}>
+                    <div className="pipe-step">
                       <div className="pipe-icon">{step.icon}</div>
                       <div className="pipe-name">{step.name}</div>
                       <div className="pipe-desc">{step.desc}</div>
                     </div>
                     {i < PIPELINE.length - 1 && <div className="pipe-arr">→</div>}
-                  </>
+                  </span>
                 ))}
               </div>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
