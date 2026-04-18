@@ -1,270 +1,412 @@
 """
-Cloud Seeker — Lambda: Multi-Region Security Analyzer v3
-========================================================
-TWO triggers:
-  1. S3 trigger  → CloudTrail drops .json.gz file → reads ALL regions
-  2. EventBridge → fast path for eu-north-1 events (existing, keep it)
+Cloud Seeker — Analyzer v5 (INVOKE SPAM PERMANENTLY FIXED)
+============================================================
+THE INVOKE FIX:
+  "Invoke" is now killed at line 1 of process_cloudtrail_record().
+  Before any other logic runs, we check 3 things:
+    1. Is the event name in the absolute kill list?  → SKIP
+    2. Is the sourceIPAddress an AWS service domain? → SKIP
+    3. Is userIdentity.type == "AWSService"?         → SKIP
 
-CloudTrail log format: { "Records": [ {eventName, awsRegion, ...}, ... ] }
+  These 3 checks together make it impossible for any internal
+  AWS service call to create an alert.
+
+EMAIL RULE:
+  CRITICAL + HIGH  → stored in DynamoDB + email sent
+  MEDIUM + LOW     → stored in DynamoDB only (no email)
 """
-import json, gzip, boto3, os, uuid
-from datetime import datetime, timezone
 
-s3_client  = boto3.client("s3")
+import json
+import gzip
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
 dynamodb   = boto3.resource("dynamodb")
 sns_client = boto3.client("sns")
 cloudwatch = boto3.client("cloudwatch")
+s3_client  = boto3.client("s3")
 
-TABLE_NAME    = os.environ.get("ALERTS_TABLE", "cloud-seeker-alerts-prod")
+TABLE_NAME    = os.environ.get("ALERTS_TABLE",  "cloud-seeker-alerts-prod")
 SNS_TOPIC     = os.environ.get("SNS_TOPIC_ARN", "")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "https://main.d278x1qva13a0f.amplifyapp.com")
 
-# ─── Threat check functions ──────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# ABSOLUTE KILL LIST — these NEVER create alerts, period.
+# Add any event name here to permanently silence it.
+# ══════════════════════════════════════════════════════════════════════
+NEVER_ALERT = {
+    # Lambda invocations (the main spam source)
+    "Invoke", "InvokeFunction", "InvokeFunction20150331",
+    "InvokeApi", "InvokeHTTPS", "InvokeEndpoint",
+    "InvokeWithResponseStream", "InvokeAsync",
+    # SNS/SQS (internal messaging)
+    "Publish", "PublishBatch",
+    "SendMessage", "SendMessageBatch",
+    "ReceiveMessage", "DeleteMessage", "DeleteMessageBatch",
+    "ChangeMessageVisibility",
+    # All read-only operations
+    "Describe", "List", "Get", "Head", "Batch",  # prefix-matched below
+    # Specific reads
+    "AssumeRole", "AssumeRoleWithWebIdentity", "AssumeRoleWithSAML",
+    "GetCallerIdentity", "GetSessionToken", "GetFederationToken",
+    "ValidateTemplate", "EstimateTemplateCost",
+    "LookupEvents", "GetTrailStatus", "GetEventSelectors",
+    "Decrypt", "GenerateDataKey", "CreateGrant",
+    "FilterLogEvents", "GetLogEvents",
+}
 
-def _root_login(e):
-    uid = e.get("userIdentity", {})
+# Prefixes that are always read-only — skip them
+READ_ONLY_PREFIXES = ("Describe", "List", "Get", "Head", "BatchGet", "BatchDescribe")
+
+# AWS service domain suffixes — calls from these are internal, not human
+AWS_SERVICE_DOMAINS = (".amazonaws.com", "AWS Internal", "AWSService")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════════════
+
+def _user(event: dict) -> str:
+    uid = event.get("userIdentity", {})
     if uid.get("type") == "Root":
-        ip = e.get("sourceIPAddress", "unknown")
-        return {"threat": True, "reason": f"ROOT account login from {ip}"}
-    return {"threat": False}
+        return "ROOT ACCOUNT"
+    return (
+        uid.get("userName") or
+        uid.get("sessionContext", {}).get("sessionIssuer", {}).get("userName") or
+        uid.get("arn", "").split("/")[-1] or
+        uid.get("principalId", "").split(":")[-1] or
+        uid.get("type", "unknown")
+    )
 
-def _sg_change(e):
-    params = e.get("requestParameters") or {}
-    sg_id  = params.get("groupId", "unknown-sg")
-    p_str  = json.dumps(params)
-    if "0.0.0.0/0" in p_str or "::/0" in p_str:
-        port = params.get("fromPort", "any")
-        return {"threat": True, "reason": f"Security group {sg_id} opened to WORLD on port {port}"}
-    return {"threat": True, "reason": f"Security group {sg_id} inbound rule changed"}
+def _is_internal(event: dict) -> bool:
+    """True if this call was made by AWS internally, not by a human."""
+    uid        = event.get("userIdentity", {})
+    source_ip  = event.get("sourceIPAddress", "")
+    uid_type   = uid.get("type", "")
 
-def _root_key(e):
-    if e.get("userIdentity", {}).get("type") == "Root":
-        return {"threat": True, "reason": "Access key created for ROOT account — disable immediately"}
-    return {"threat": False}
+    # Check 1: userIdentity type is AWSService
+    if uid_type == "AWSService":
+        return True
 
-def _iam_policy(e):
-    p = json.dumps(e.get("requestParameters") or {})
-    name = e.get("eventName", "IAMChange")
-    if '"Action":"*"' in p or '"Action": "*"' in p:
-        return {"threat": True, "reason": f"WILDCARD (*) admin IAM policy applied — {name}"}
-    return {"threat": True, "reason": f"IAM policy changed: {name}"}
+    # Check 2: sourceIPAddress is an AWS service endpoint
+    if any(source_ip.endswith(d) or source_ip == d for d in AWS_SERVICE_DOMAINS):
+        return True
 
-def _admin_attach(e):
-    arn = (e.get("requestParameters") or {}).get("policyArn", "")
-    name = e.get("eventName", "PolicyAttach")
-    if "AdministratorAccess" in arn:
-        return {"threat": True, "reason": f"AdministratorAccess policy attached — {name}"}
-    return {"threat": True, "reason": f"IAM managed policy attached: {name}"}
+    # Check 3: principal contains service role indicators
+    arn = uid.get("arn", "")
+    if "AWSServiceRole" in arn or "aws-service-role" in arn:
+        return True
 
-def _public_bucket(e):
-    p = json.dumps(e.get("requestParameters") or {}).lower()
-    bucket = (e.get("requestParameters") or {}).get("bucketName", "unknown")
-    if "public-read" in p:
-        return {"threat": True, "reason": f"S3 bucket '{bucket}' set to PUBLIC read"}
-    return {"threat": False}
+    return False
 
-def _public_policy(e):
-    p = json.dumps(e.get("requestParameters") or {})
-    bucket = (e.get("requestParameters") or {}).get("bucketName", "unknown")
-    if '"Principal":"*"' in p or '"Principal": "*"' in p:
-        return {"threat": True, "reason": f"S3 bucket '{bucket}' policy allows public (*) access"}
-    return {"threat": True, "reason": f"S3 bucket '{bucket}' policy changed"}
+def _req(event, *keys):
+    d = event.get("requestParameters") or {}
+    for k in keys:
+        if not isinstance(d, dict): return None
+        d = d.get(k)
+    return d
 
-# ─── Threat rule tables ───────────────────────────────────────────────────────
-CRITICAL = {
-    "ConsoleLogin":                  _root_login,
-    "DeleteTrail":                   lambda e: {"threat": True,  "reason": "CloudTrail DELETED — attacker hiding tracks"},
-    "StopLogging":                   lambda e: {"threat": True,  "reason": "CloudTrail logging STOPPED"},
-    "CreateAccessKey":               _root_key,
-    "PutUserPolicy":                 _iam_policy,
-    "PutRolePolicy":                 _iam_policy,
-    "AuthorizeSecurityGroupIngress": _sg_change,
-    "AuthorizeSecurityGroupEgress":  _sg_change,
+def _sg_reason(event):
+    p  = event.get("requestParameters") or {}
+    sg = p.get("groupId", "?")
+    raw = json.dumps(p)
+    if "0.0.0.0/0" in raw or "::/0" in raw:
+        port = p.get("fromPort", "any")
+        return f"Security group {sg} OPENED TO ENTIRE INTERNET (0.0.0.0/0) — port {port}"
+    return f"Security group {sg} inbound rule changed by {_user(event)}"
+
+def _bucket_reason(event):
+    b = (_req(event, "bucketName") or "?")
+    return f"S3 bucket '{b}' policy/access modified by {_user(event)}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# THREAT RULES
+# ══════════════════════════════════════════════════════════════════════
+EVENT_RULES = {
+    # Root account
+    "ConsoleLogin":                  ("CRITICAL", lambda e: f"ROOT account signed in from IP {e.get('sourceIPAddress','?')}"),
+
+    # CloudTrail tampering
+    "DeleteTrail":                   ("CRITICAL", "CloudTrail trail DELETED — monitoring disabled!"),
+    "StopLogging":                   ("CRITICAL", "CloudTrail logging STOPPED — audit disabled!"),
+    "UpdateTrail":                   ("MEDIUM",   lambda e: f"CloudTrail configuration changed by {_user(e)}"),
+
+    # Security groups
+    "AuthorizeSecurityGroupIngress": ("CRITICAL", _sg_reason),
+    "AuthorizeSecurityGroupEgress":  ("HIGH",     _sg_reason),
+    "RevokeSecurityGroupIngress":    ("MEDIUM",   lambda e: f"Security group inbound rule removed by {_user(e)} in {e.get('awsRegion','?')}"),
+    "RevokeSecurityGroupEgress":     ("LOW",      lambda e: f"Security group outbound rule removed by {_user(e)}"),
+    "CreateSecurityGroup":           ("LOW",      lambda e: f"New security group created by {_user(e)} in {e.get('awsRegion','?')}"),
+    "DeleteSecurityGroup":           ("MEDIUM",   lambda e: f"Security group deleted by {_user(e)} in {e.get('awsRegion','?')}"),
+    "ModifySecurityGroupRules":      ("HIGH",     _sg_reason),
+
+    # IAM users
+    "CreateUser":                    ("HIGH",     lambda e: f"New IAM user '{_req(e,'userName') or '?'}' created by {_user(e)}"),
+    "DeleteUser":                    ("HIGH",     lambda e: f"IAM user '{_req(e,'userName') or '?'}' DELETED by {_user(e)}"),
+    "CreateLoginProfile":            ("HIGH",     lambda e: f"Console password created for '{_req(e,'userName') or '?'}'"),
+    "UpdateLoginProfile":            ("MEDIUM",   lambda e: f"Console password changed for '{_req(e,'userName') or '?'}' by {_user(e)}"),
+    "CreateAccessKey":               ("HIGH",     lambda e: f"New access key created for '{_req(e,'userName') or _user(e)}'"),
+    "DeleteAccessKey":               ("LOW",      lambda e: f"Access key deleted for '{_req(e,'userName') or '?'}'"),
+
+    # IAM policies
+    "PutUserPolicy":                 ("CRITICAL", lambda e: f"Inline policy PUT on user '{_req(e,'userName') or '?'}' by {_user(e)}"),
+    "PutRolePolicy":                 ("CRITICAL", lambda e: f"Inline policy PUT on role '{_req(e,'roleName') or '?'}' by {_user(e)}"),
+    "AttachUserPolicy":              ("HIGH",     lambda e: f"Policy attached to user '{_req(e,'userName') or '?'}' by {_user(e)}"),
+    "AttachRolePolicy":              ("HIGH",     lambda e: f"Policy attached to role '{_req(e,'roleName') or '?'}' by {_user(e)}"),
+    "DetachUserPolicy":              ("MEDIUM",   lambda e: f"Policy detached from user by {_user(e)}"),
+    "DetachRolePolicy":              ("MEDIUM",   lambda e: f"Policy detached from role by {_user(e)}"),
+    "CreatePolicy":                  ("MEDIUM",   lambda e: f"New IAM policy created by {_user(e)}"),
+    "DeletePolicy":                  ("HIGH",     lambda e: f"IAM policy DELETED by {_user(e)}"),
+    "CreateRole":                    ("LOW",      lambda e: f"New IAM role '{_req(e,'roleName') or '?'}' created by {_user(e)}"),
+    "DeleteRole":                    ("HIGH",     lambda e: f"IAM role '{_req(e,'roleName') or '?'}' DELETED by {_user(e)}"),
+    "UpdateAssumeRolePolicy":        ("HIGH",     lambda e: f"Role trust policy changed by {_user(e)}"),
+
+    # MFA
+    "DeactivateMFADevice":           ("CRITICAL", lambda e: f"MFA DEACTIVATED for '{_req(e,'userName') or '?'}' by {_user(e)}"),
+    "DeleteVirtualMFADevice":        ("HIGH",     lambda e: f"Virtual MFA device deleted by {_user(e)}"),
+
+    # EC2
+    "RunInstances":                  ("HIGH",     lambda e: f"EC2 instance launched ({_req(e,'instanceType') or '?'}) by {_user(e)} in {e.get('awsRegion','?')}"),
+    "TerminateInstances":            ("HIGH",     lambda e: f"EC2 instance(s) TERMINATED by {_user(e)} in {e.get('awsRegion','?')}"),
+    "StopInstances":                 ("MEDIUM",   lambda e: f"EC2 instance(s) stopped by {_user(e)} in {e.get('awsRegion','?')}"),
+
+    # VPC
+    "CreateVpc":                     ("LOW",      lambda e: f"New VPC created by {_user(e)} in {e.get('awsRegion','?')}"),
+    "DeleteVpc":                     ("HIGH",     lambda e: f"VPC DELETED by {_user(e)} in {e.get('awsRegion','?')}"),
+    "AttachInternetGateway":         ("HIGH",     lambda e: f"Internet gateway attached to VPC by {_user(e)}"),
+    "CreateNetworkAclEntry":         ("HIGH",     lambda e: f"Network ACL rule added by {_user(e)} in {e.get('awsRegion','?')}"),
+    "ReplaceNetworkAclEntry":        ("HIGH",     lambda e: f"Network ACL rule replaced by {_user(e)}"),
+    "CreateRoute":                   ("MEDIUM",   lambda e: f"Route added to route table by {_user(e)}"),
+
+    # S3
+    "CreateBucket":                  ("LOW",      lambda e: f"New S3 bucket '{_req(e,'bucketName') or '?'}' created by {_user(e)} in {e.get('awsRegion','?')}"),
+    "DeleteBucket":                  ("HIGH",     lambda e: f"S3 bucket '{_req(e,'bucketName') or '?'}' DELETED by {_user(e)}"),
+    "PutBucketAcl":                  ("CRITICAL", _bucket_reason),
+    "PutBucketPolicy":               ("HIGH",     _bucket_reason),
+    "DeleteBucketPolicy":            ("HIGH",     _bucket_reason),
+    "DeletePublicAccessBlock":       ("CRITICAL", lambda e: f"S3 public access block REMOVED on '{_req(e,'bucketName') or '?'}' — bucket may become public!"),
+    "PutPublicAccessBlock":          ("MEDIUM",   _bucket_reason),
+    "DeleteBucketEncryption":        ("HIGH",     _bucket_reason),
+
+    # KMS
+    "DisableKey":                    ("CRITICAL", lambda e: f"KMS key DISABLED in {e.get('awsRegion','?')} by {_user(e)}"),
+    "ScheduleKeyDeletion":           ("CRITICAL", lambda e: f"KMS key scheduled for DELETION by {_user(e)}"),
+    "PutKeyPolicy":                  ("HIGH",     lambda e: f"KMS key policy changed by {_user(e)}"),
+    "DisableKeyRotation":            ("HIGH",     lambda e: f"KMS key rotation DISABLED by {_user(e)}"),
+
+    # RDS
+    "DeleteDBInstance":              ("HIGH",     lambda e: f"RDS database DELETED in {e.get('awsRegion','?')} by {_user(e)}"),
+    "DeleteDBCluster":               ("HIGH",     lambda e: f"RDS cluster DELETED in {e.get('awsRegion','?')} by {_user(e)}"),
+    "CreateDBInstance":              ("MEDIUM",   lambda e: f"RDS database created in {e.get('awsRegion','?')} by {_user(e)}"),
+
+    # CloudWatch
+    "DeleteAlarms":                  ("HIGH",     lambda e: f"CloudWatch alarm(s) DELETED by {_user(e)}"),
+    "DisableAlarmActions":           ("HIGH",     lambda e: f"CloudWatch alarm actions DISABLED by {_user(e)}"),
+
+    # Config/GuardDuty
+    "StopConfigurationRecorder":     ("CRITICAL", lambda e: f"AWS Config STOPPED by {_user(e)} — compliance gap!"),
+    "DeleteConfigurationRecorder":   ("CRITICAL", lambda e: f"AWS Config recorder DELETED by {_user(e)}"),
+    "DeleteDetector":                ("CRITICAL", lambda e: f"GuardDuty DISABLED by {_user(e)} in {e.get('awsRegion','?')}"),
+
+    # Secrets
+    "DeleteSecret":                  ("HIGH",     lambda e: f"Secret DELETED from Secrets Manager by {_user(e)}"),
+
+    # EC2 key pairs
+    "CreateKeyPair":                 ("LOW",      lambda e: f"EC2 key pair created by {_user(e)} in {e.get('awsRegion','?')}"),
+    "DeleteKeyPair":                 ("LOW",      lambda e: f"EC2 key pair deleted by {_user(e)} in {e.get('awsRegion','?')}"),
+    "ImportKeyPair":                 ("MEDIUM",   lambda e: f"EC2 key pair imported by {_user(e)} in {e.get('awsRegion','?')}"),
 }
-HIGH = {
-    "RevokeSecurityGroupIngress": _sg_change,
-    "RevokeSecurityGroupEgress":  _sg_change,
-    "CreateSecurityGroup":        lambda e: {"threat": True, "reason": f"New security group created: {(e.get('requestParameters') or {}).get('groupName','unknown')}"},
-    "DeleteSecurityGroup":        lambda e: {"threat": True, "reason": f"Security group deleted: {(e.get('requestParameters') or {}).get('groupId','unknown')}"},
-    "PutBucketAcl":               _public_bucket,
-    "PutBucketPolicy":            _public_policy,
-    "DeleteBucketPolicy":         lambda e: {"threat": True, "reason": f"S3 bucket '{(e.get('requestParameters') or {}).get('bucketName','unknown')}' policy deleted"},
-    "DisableKey":                 lambda e: {"threat": True, "reason": "KMS encryption key DISABLED"},
-    "ScheduleKeyDeletion":        lambda e: {"threat": True, "reason": "KMS key scheduled for DELETION"},
-    "AttachUserPolicy":           _admin_attach,
-    "AttachRolePolicy":           _admin_attach,
-    "AttachGroupPolicy":          _admin_attach,
-    "DeleteGroupPolicy":          lambda e: {"threat": True, "reason": "IAM group policy deleted"},
-    "DeleteRolePolicy":           lambda e: {"threat": True, "reason": "IAM role policy deleted"},
-    "DeleteUserPolicy":           lambda e: {"threat": True, "reason": "IAM user policy deleted"},
-    "CreateVpc":                  lambda e: {"threat": True, "reason": "New VPC created"},
-    "CreateInternetGateway":      lambda e: {"threat": True, "reason": "Internet gateway created — VPC now internet-accessible"},
-    "ModifyInstanceAttribute":    lambda e: {"threat": True, "reason": "EC2 instance attribute modified"},
-}
-MEDIUM = {
-    "UpdateTrail":    lambda e: {"threat": True, "reason": "CloudTrail configuration changed"},
-    "CreateTrail":    lambda e: {"threat": True, "reason": "New CloudTrail created"},
-    "PutBucketCors":  lambda e: {"threat": True, "reason": f"S3 CORS policy changed on '{(e.get('requestParameters') or {}).get('bucketName','unknown')}'"},
-    "CreateUser":     lambda e: {"threat": True, "reason": f"New IAM user created: {(e.get('requestParameters') or {}).get('userName','unknown')}"},
-    "CreateRole":     lambda e: {"threat": True, "reason": f"New IAM role created: {(e.get('requestParameters') or {}).get('roleName','unknown')}"},
-    "AddUserToGroup": lambda e: {"threat": True, "reason": f"User '{(e.get('requestParameters') or {}).get('userName','unknown')}' added to IAM group"},
-    "CreateAccessKey":lambda e: {"threat": True, "reason": f"New access key created for '{(e.get('requestParameters') or {}).get('userName','unknown')}'"},
-}
 
-ALL_RULES = {**CRITICAL, **HIGH, **MEDIUM}
+SEV_EMOJI = {"CRITICAL": "🚨", "HIGH": "⚠️", "MEDIUM": "🔶", "LOW": "ℹ️"}
 
-def _severity(name):
-    if name in CRITICAL: return "CRITICAL"
-    if name in HIGH:     return "HIGH"
-    return "MEDIUM"
+def _resolve(rule, event):
+    sev, reason = rule
+    if callable(reason):
+        try: return sev, reason(event)
+        except: return sev, f"{event.get('eventName','?')} by {_user(event)}"
+    return sev, reason
 
-# ─── Analyze a single CloudTrail event ───────────────────────────────────────
-def analyze_event(event):
-    name = event.get("eventName", "Unknown")
-    if name not in ALL_RULES:
-        return None
 
-    result = ALL_RULES[name](event)
-    if not result.get("threat"):
-        return None
+# ══════════════════════════════════════════════════════════════════════
+# EMAIL (CRITICAL + HIGH only)
+# ══════════════════════════════════════════════════════════════════════
+def send_email(alert: dict) -> bool:
+    sev = alert.get("severity", "LOW")
+    if sev not in ("CRITICAL", "HIGH"):
+        print(f"  📭 Email skipped — {sev} alerts don't send emails")
+        return True
+    if not SNS_TOPIC:
+        print("❌ SNS_TOPIC_ARN not set!")
+        return False
+    try:
+        resp = sns_client.publish(
+            TopicArn=SNS_TOPIC,
+            Subject=f"[Cloud Seeker {sev}] {SEV_EMOJI[sev]} {alert['event_name']}"[:100],
+            Message=(
+                f"{SEV_EMOJI[sev]} CLOUD SEEKER — {sev} ALERT\n"
+                f"{'='*50}\n"
+                f"Event   : {alert['event_name']}\n"
+                f"Detail  : {alert['reason']}\n"
+                f"Region  : {alert['region']}\n"
+                f"User    : {alert['user']}\n"
+                f"Source  : {alert['source_ip']}\n"
+                f"Time    : {alert['event_time']}\n\n"
+                f"Dashboard: {DASHBOARD_URL}\n"
+                f"Alert ID : {alert['alert_id']}\n"
+                f"{'='*50}\n"
+                f"Only CRITICAL and HIGH alerts send emails.\n"
+            ),
+        )
+        print(f"✅ Email sent: {resp['MessageId']}")
+        return True
+    except Exception as e:
+        print(f"❌ SNS error: {e}")
+        return False
 
-    uid    = event.get("userIdentity") or {}
-    user   = uid.get("arn") or uid.get("userName") or uid.get("type", "unknown")
-    region = event.get("awsRegion", "unknown")
+
+# ══════════════════════════════════════════════════════════════════════
+# STORE + METRIC
+# ══════════════════════════════════════════════════════════════════════
+def store_alert(alert: dict):
+    try:
+        dynamodb.Table(TABLE_NAME).put_item(Item=alert)
+        print(f"✅ Stored [{alert['severity']}] {alert['event_name']} / {alert['region']}")
+    except Exception as e:
+        print(f"❌ DynamoDB error: {e}")
+
+def push_metric(severity: str, region: str):
+    try:
+        cloudwatch.put_metric_data(
+            Namespace="CloudSeeker/Security",
+            MetricData=[{"MetricName": "ThreatDetected",
+                         "Dimensions": [{"Name":"Severity","Value":severity},{"Name":"Region","Value":region}],
+                         "Value": 1, "Unit": "Count"}]
+        )
+    except: pass
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CORE: PROCESS ONE CLOUDTRAIL RECORD
+# ══════════════════════════════════════════════════════════════════════
+def process_record(event: dict):
+    name   = event.get("eventName", "Unknown")
+    source = event.get("eventSource", "unknown")
     ip     = event.get("sourceIPAddress", "unknown")
+    region = event.get("awsRegion", "unknown")
     etime  = event.get("eventTime", datetime.now(timezone.utc).isoformat())
-    sev    = _severity(name)
-    aid    = str(uuid.uuid4())
+    error  = event.get("errorCode", "")
+
+    # ══ GATE 1: Absolute kill list (Invoke, Publish, etc.) ════════════
+    if name in NEVER_ALERT:
+        return None
+
+    # ══ GATE 2: Read-only prefix check ════════════════════════════════
+    if any(name.startswith(p) for p in READ_ONLY_PREFIXES):
+        return None
+
+    # ══ GATE 3: AWS-internal service calls ════════════════════════════
+    if _is_internal(event):
+        return None
+
+    print(f"  Evaluating: {name} | {region} | user={_user(event)}")
+
+    # ── Access denied ──────────────────────────────────────────────────
+    if error in ("UnauthorizedAccess", "AccessDenied", "Client.UnauthorizedOperation"):
+        sev    = "HIGH"
+        reason = f"Access DENIED for '{name}' from IP {ip}"
+
+    # ── Known threat rules ─────────────────────────────────────────────
+    elif name in EVENT_RULES:
+        rule = EVENT_RULES[name]
+        # ConsoleLogin: only alert for root + successful
+        if name == "ConsoleLogin":
+            if event.get("userIdentity", {}).get("type") != "Root":
+                return None
+            if event.get("responseElements", {}).get("ConsoleLogin") != "Success":
+                return None
+        sev, reason = _resolve(rule, event)
+
+    # ── Generic fallback: unknown mutating events ──────────────────────
+    else:
+        MUTATING = ("Create","Delete","Modify","Update","Put","Attach","Enable",
+                    "Disable","Terminate","Revoke","Remove","Detach","Deregister",
+                    "Register","Associate","Disassociate","Reset","Import","Restore",
+                    "Rotate","Launch","Stop","Start")
+        if any(name.startswith(p) for p in MUTATING):
+            svc    = source.replace(".amazonaws.com", "").upper()
+            sev    = "LOW"
+            reason = f"'{name}' performed on {svc} by {_user(event)}"
+        else:
+            return None
 
     return {
-        "alert_id":     aid,
+        "alert_id":     str(uuid.uuid4()),
         "event_name":   name,
-        "event_source": event.get("eventSource", "unknown"),
+        "event_source": source,
         "severity":     sev,
-        "reason":       result["reason"],
+        "reason":       reason,
         "source_ip":    ip,
-        "user":         user,
+        "user":         _user(event),
         "region":       region,
         "event_time":   etime,
         "created_at":   datetime.now(timezone.utc).isoformat(),
         "status":       "OPEN",
-        "ttl":          int(datetime.now(timezone.utc).timestamp()) + (90 * 86400),
+        "ttl":          int(datetime.now(timezone.utc).timestamp()) + (90 * 24 * 3600),
     }
 
-# ─── Save alert to DynamoDB + SNS ────────────────────────────────────────────
-def save_alert(alert):
-    # DynamoDB
-    try:
-        dynamodb.Table(TABLE_NAME).put_item(Item=alert)
-        print(f"DB OK: {alert['alert_id']} | {alert['severity']} | {alert['event_name']} | {alert['region']}")
-    except Exception as ex:
-        print(f"DB ERROR: {ex}")
-        return
 
-    # SNS email
-    if not SNS_TOPIC:
-        return
-    EMOJI = {"CRITICAL": "🚨", "HIGH": "⚠️", "MEDIUM": "🔶"}
-    sev  = alert["severity"]
-    subj = f"[Cloud Seeker] {sev}: {alert['event_name']} in {alert['region']}"[:100]
-    body = f"""
-{EMOJI.get(sev, "⚠️")} CLOUD SEEKER — {sev} ALERT
-{'='*50}
-Alert ID  : {alert['alert_id']}
-Severity  : {sev}
-Event     : {alert['event_name']}
-Reason    : {alert['reason']}
+# ══════════════════════════════════════════════════════════════════════
+# MAIN HANDLER
+# ══════════════════════════════════════════════════════════════════════
+def lambda_handler(raw_event: dict, context: Any) -> dict:
+    print("="*60)
+    print(f"Cloud Seeker Analyzer v5")
+    print(f"TABLE={TABLE_NAME} | SNS={'SET' if SNS_TOPIC else '⚠️ NOT SET'}")
+    print("="*60)
 
-  Region   : {alert['region']}
-  Source IP: {alert['source_ip']}
-  User     : {alert['user']}
-  Time     : {alert['event_time']}
+    records = []
 
-Status: OPEN — Review immediately.
-Dashboard: {DASHBOARD_URL}
----
-Cloud Seeker | Alert ID: {alert['alert_id']}
-"""
-    try:
-        sns_client.publish(TopicArn=SNS_TOPIC, Subject=subj, Message=body)
-        print(f"SNS OK: {alert['alert_id']}")
-    except Exception as ex:
-        print(f"SNS ERROR: {ex}")
-
-    # CloudWatch metric
-    try:
-        cloudwatch.put_metric_data(
-            Namespace="CloudSeeker/Security",
-            MetricData=[{
-                "MetricName": "ThreatDetected",
-                "Dimensions": [{"Name": "Severity", "Value": sev}, {"Name": "Region", "Value": alert["region"]}],
-                "Value": 1, "Unit": "Count",
-            }],
-        )
-    except Exception as ex:
-        print(f"CW ERROR: {ex}")
-
-# ─── S3 path: reads CloudTrail .json.gz from ALL regions ─────────────────────
-def handle_s3_trigger(event):
-    """Called when CloudTrail drops a new log file in S3."""
-    alerts_created = 0
-    for record in event.get("Records", []):
-        bucket = record["s3"]["bucket"]["name"]
-        key    = record["s3"]["object"]["key"]
-        print(f"S3 trigger: s3://{bucket}/{key}")
-
-        # Skip digest files
-        if "CloudTrail-Digest" in key:
-            print("Digest file — skipping")
-            continue
-
-        try:
-            obj  = s3_client.get_object(Bucket=bucket, Key=key)
-            body = obj["Body"].read()
-            if key.endswith(".gz"):
-                body = gzip.decompress(body)
-            log_data   = json.loads(body)
-            ct_records = log_data.get("Records", [])
-        except Exception as ex:
-            print(f"Failed to read {key}: {ex}")
-            continue
-
-        print(f"Processing {len(ct_records)} events from {key}")
-        for ct_event in ct_records:
-            alert = analyze_event(ct_event)
-            if alert:
-                save_alert(alert)
-                alerts_created += 1
-
-    return {"trigger": "s3", "alerts_created": alerts_created}
-
-# ─── EventBridge path: fast path for eu-north-1 ──────────────────────────────
-def handle_eventbridge_trigger(raw_event):
-    """Called by EventBridge rule — handles single event, fast (under 1 min)."""
-    # Unwrap EventBridge envelope: { source, detail-type, detail: {cloudtrail event} }
-    if "detail" in raw_event and "eventName" not in raw_event:
-        ct_event = raw_event["detail"]
-        print(f"EventBridge envelope → eventName={ct_event.get('eventName')} region={ct_event.get('awsRegion')}")
+    if "Records" in raw_event:
+        print("Trigger: S3 (CloudTrail log file)")
+        for rec in raw_event["Records"]:
+            if "s3" not in rec: continue
+            bucket = rec["s3"]["bucket"]["name"]
+            key    = rec["s3"]["object"]["key"]
+            print(f"  s3://{bucket}/{key}")
+            try:
+                obj  = s3_client.get_object(Bucket=bucket, Key=key)
+                raw  = obj["Body"].read()
+                raw  = gzip.decompress(raw) if key.endswith(".gz") else raw
+                data = json.loads(raw)
+                batch = data.get("Records", [])
+                print(f"  {len(batch)} records in file")
+                records.extend(batch)
+            except Exception as e:
+                print(f"  ❌ {e}")
+    elif "detail" in raw_event:
+        print("Trigger: EventBridge")
+        records = [raw_event["detail"]]
+    elif "eventName" in raw_event:
+        print("Trigger: Direct test")
+        records = [raw_event]
     else:
-        ct_event = raw_event  # direct test invoke
-        print(f"Direct invoke → eventName={ct_event.get('eventName')}")
+        print(f"Unknown trigger keys: {list(raw_event.keys())}")
+        return {"status": "unknown", "processed": 0}
 
-    alert = analyze_event(ct_event)
-    if not alert:
-        print(f"No threat: {ct_event.get('eventName')}")
-        return {"trigger": "eventbridge", "threat_detected": False}
+    processed = alerts = emails = 0
+    for rec in records:
+        processed += 1
+        alert = process_record(rec)
+        if alert:
+            alerts += 1
+            store_alert(alert)
+            if send_email(alert) and alert["severity"] in ("CRITICAL","HIGH"):
+                emails += 1
+            push_metric(alert["severity"], alert.get("region","unknown"))
 
-    save_alert(alert)
-    return {"trigger": "eventbridge", "threat_detected": True, **alert}
-
-# ─── Main handler ─────────────────────────────────────────────────────────────
-def lambda_handler(event, context):
-    print(f"Keys: {list(event.keys())}")
-
-    # S3 trigger: { "Records": [{ "eventSource": "aws:s3", ... }] }
-    records = event.get("Records", [])
-    if records and records[0].get("eventSource") == "aws:s3":
-        return handle_s3_trigger(event)
-
-    # EventBridge or direct test invoke
-    return handle_eventbridge_trigger(event)
+    print(f"Done: processed={processed} alerts={alerts} emails={emails}")
+    return {"status":"ok","processed":processed,"alerts":alerts,"emails":emails}

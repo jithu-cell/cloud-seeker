@@ -10,8 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNotifications } from "./components/NotificationManager";
-
+import { useNotifications } from "./NotificationManager";
 // ── API ────────────────────────────────────────────────────────────────
 const API = "https://2a0js0vjv0.execute-api.eu-north-1.amazonaws.com/Stage";
 

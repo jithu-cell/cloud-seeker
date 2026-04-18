@@ -1,192 +1,235 @@
 """
-Cloud Seeker — Lambda: API Gateway Handler
-Serves the frontend dashboard with alerts, stats, compliance data.
+Cloud Seeker — API Handler (FIXED v4)
+=====================================
+Endpoints:
+  GET  /alerts              - list open alerts (real DynamoDB data)
+  GET  /alerts?status=ALL   - list all alerts including resolved
+  POST /alerts/{id}/resolve - mark alert as resolved
+  GET  /stats               - summary counts for dashboard
+  GET  /health              - health check
 """
 
 import json
 import boto3
 import os
+import logging
 from datetime import datetime, timezone, timedelta
-from boto3.dynamodb.conditions import Key, Attr
-from typing import Any
+from boto3.dynamodb.conditions import Attr
 from decimal import Decimal
 
-dynamodb = boto3.resource("dynamodb")
-cloudwatch = boto3.client("cloudwatch")
-config_client = boto3.client("config")
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-TABLE_NAME = os.environ.get("ALERTS_TABLE", "cloud-seeker-alerts")
-
-
-# ─── Response Helpers ─────────────────────────────────────────────────────────
-
-def cors_response(status_code: int, body: Any) -> dict:
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        },
-        "body": json.dumps(body, default=decimal_default),
-    }
+dynamodb   = boto3.resource('dynamodb')
+TABLE_NAME = os.environ.get('ALERTS_TABLE', 'cloud-seeker-alerts-prod')
 
 
-def decimal_default(obj):
+def decimal_fix(obj):
     if isinstance(obj, Decimal):
         return int(obj) if obj % 1 == 0 else float(obj)
     raise TypeError
 
 
-# ─── Route Handlers ──────────────────────────────────────────────────────────
+def make_response(status: int, body: dict) -> dict:
+    return {
+        'statusCode': status,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+            'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+            'Cache-Control': 'no-cache, no-store'
+        },
+        'body': json.dumps(body, default=decimal_fix)
+    }
+
 
 def get_alerts(query_params: dict) -> dict:
-    """GET /alerts — returns recent security alerts"""
-    table = dynamodb.Table(TABLE_NAME)
+    table  = dynamodb.Table(TABLE_NAME)
+    limit  = min(int(query_params.get('limit', 100)), 500)
+    status = query_params.get('status', 'OPEN')   # OPEN | ALL | RESOLVED
 
-    severity_filter = query_params.get("severity")
-    limit = int(query_params.get("limit", 50))
-    status = query_params.get("status", "OPEN")
+    # Build filter
+    filters = []
+    if status == 'OPEN':
+        filters.append(Attr('status').eq('OPEN'))
+    elif status == 'RESOLVED':
+        filters.append(Attr('status').eq('RESOLVED'))
+    # status=ALL → no status filter
 
-    scan_kwargs = {
-        "FilterExpression": Attr("status").eq(status),
-        "Limit": min(limit, 200),
+    sev_filter = query_params.get('severity')
+    if sev_filter:
+        filters.append(Attr('severity').eq(sev_filter.upper()))
+
+    region_filter = query_params.get('region')
+    if region_filter:
+        filters.append(Attr('region').eq(region_filter))
+
+    # Combine filters
+    expr = None
+    for f in filters:
+        expr = f if expr is None else expr & f
+
+    kwargs = {}
+    if expr:
+        kwargs['FilterExpression'] = expr
+
+    result = table.scan(**kwargs)
+    items  = result.get('Items', [])
+
+    # Keep paginating if needed
+    while 'LastEvaluatedKey' in result and len(items) < limit:
+        kwargs['ExclusiveStartKey'] = result['LastEvaluatedKey']
+        result = table.scan(**kwargs)
+        items.extend(result.get('Items', []))
+
+    # Sort newest first
+    items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+    items = items[:limit]
+
+    # Remove internal fields
+    for item in items:
+        item.pop('ttl', None)
+
+    return {
+        'alerts':    items,
+        'count':     len(items),
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }
-    if severity_filter:
-        scan_kwargs["FilterExpression"] = (
-            Attr("status").eq(status) & Attr("severity").eq(severity_filter)
-        )
-
-    result = table.scan(**scan_kwargs)
-    items = result.get("Items", [])
-
-    # Sort by created_at descending
-    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-
-    return cors_response(200, {
-        "alerts": items,
-        "count": len(items),
-    })
-
-
-def get_stats() -> dict:
-    """GET /stats — returns dashboard KPI stats"""
-    table = dynamodb.Table(TABLE_NAME)
-
-    now = datetime.now(timezone.utc)
-    last_24h = (now - timedelta(hours=24)).isoformat()
-
-    result = table.scan(
-        FilterExpression=Attr("created_at").gte(last_24h)
-    )
-    alerts = result.get("Items", [])
-
-    by_severity = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    for alert in alerts:
-        sev = alert.get("severity", "LOW")
-        by_severity[sev] = by_severity.get(sev, 0) + 1
-
-    # CloudWatch metrics: total events in last hour
-    cw_response = cloudwatch.get_metric_statistics(
-        Namespace="CloudSeeker/Security",
-        MetricName="ThreatDetected",
-        StartTime=now - timedelta(hours=1),
-        EndTime=now,
-        Period=3600,
-        Statistics=["Sum"],
-    )
-    threats_last_hour = int(
-        sum(dp["Sum"] for dp in cw_response.get("Datapoints", []))
-    )
-
-    return cors_response(200, {
-        "total_alerts_24h": len(alerts),
-        "by_severity": by_severity,
-        "threats_last_hour": threats_last_hour,
-        "open_critical": by_severity["CRITICAL"],
-    })
-
-
-def get_compliance() -> dict:
-    """GET /compliance — AWS Config compliance summary"""
-    try:
-        response = config_client.describe_compliance_by_config_rule(
-            ComplianceTypes=["COMPLIANT", "NON_COMPLIANT"]
-        )
-        rules = response.get("ComplianceByConfigRules", [])
-
-        compliant = sum(
-            1 for r in rules
-            if r.get("Compliance", {}).get("ComplianceType") == "COMPLIANT"
-        )
-        non_compliant = sum(
-            1 for r in rules
-            if r.get("Compliance", {}).get("ComplianceType") == "NON_COMPLIANT"
-        )
-        total = compliant + non_compliant
-        score = int((compliant / total * 100)) if total > 0 else 0
-
-        return cors_response(200, {
-            "score": score,
-            "compliant_rules": compliant,
-            "non_compliant_rules": non_compliant,
-            "total_rules": total,
-            "rules": [
-                {
-                    "name": r.get("ConfigRuleName"),
-                    "status": r.get("Compliance", {}).get("ComplianceType"),
-                }
-                for r in rules[:20]
-            ],
-        })
-    except Exception as e:
-        print(f"Config error: {e}")
-        return cors_response(200, {
-            "score": 0, "error": "Config not enabled or insufficient permissions"
-        })
 
 
 def resolve_alert(alert_id: str) -> dict:
-    """POST /alerts/{id}/resolve"""
+    """Mark an alert as resolved."""
     table = dynamodb.Table(TABLE_NAME)
-    table.update_item(
-        Key={"alert_id": alert_id},
-        UpdateExpression="SET #s = :val, resolved_at = :ts",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={
-            ":val": "RESOLVED",
-            ":ts": datetime.now(timezone.utc).isoformat(),
-        },
+
+    # Find the alert (need both hash and range key)
+    result = table.scan(
+        FilterExpression=Attr('alert_id').eq(alert_id),
+        Limit=1
     )
-    return cors_response(200, {"alert_id": alert_id, "status": "RESOLVED"})
+    items = result.get('Items', [])
+    if not items:
+        return None
+
+    item = items[0]
+
+    # Update status to RESOLVED
+    table.update_item(
+        Key={
+            'alert_id':  item['alert_id'],
+            'created_at': item['created_at']
+        },
+        UpdateExpression='SET #s = :resolved, resolved_at = :ts',
+        ExpressionAttributeNames={'#s': 'status'},
+        ExpressionAttributeValues={
+            ':resolved': 'RESOLVED',
+            ':ts': datetime.now(timezone.utc).isoformat()
+        }
+    )
+    return {'resolved': True, 'alert_id': alert_id}
 
 
-# ─── Main Handler ─────────────────────────────────────────────────────────────
+def get_stats() -> dict:
+    table = dynamodb.Table(TABLE_NAME)
 
-def lambda_handler(event: dict, context: Any) -> dict:
-    method = event.get("httpMethod", "GET")
-    path = event.get("path", "/")
-    query = event.get("queryStringParameters") or {}
-    path_params = event.get("pathParameters") or {}
+    # Get all alerts (DynamoDB is small in free tier, scan is fine)
+    result = table.scan()
+    all_items = result.get('Items', [])
 
-    print(f"{method} {path}")
+    while 'LastEvaluatedKey' in result:
+        result = table.scan(ExclusiveStartKey=result['LastEvaluatedKey'])
+        all_items.extend(result.get('Items', []))
 
-    if method == "OPTIONS":
-        return cors_response(200, {})
+    now       = datetime.now(timezone.utc)
+    hour_ago  = (now - timedelta(hours=1)).isoformat()
+    day_ago   = (now - timedelta(days=1)).isoformat()
+    week_ago  = (now - timedelta(days=7)).isoformat()
 
-    if path == "/stats" and method == "GET":
-        return get_stats()
+    # Aggregate
+    by_sev      = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+    by_region   = {}
+    by_category = {}
+    by_day      = {}
+    open_count  = 0
+    last_hour   = 0
+    last_day    = 0
+    last_week   = 0
 
-    if path == "/alerts" and method == "GET":
-        return get_alerts(query)
+    for item in all_items:
+        sev    = item.get('severity', 'LOW')
+        region = item.get('region', 'unknown')
+        cat    = item.get('event_source', 'unknown').replace('.amazonaws.com', '').upper()
+        ts     = item.get('created_at', item.get('event_time', ''))
 
-    if path == "/compliance" and method == "GET":
-        return get_compliance()
+        by_sev[sev] = by_sev.get(sev, 0) + 1
+        by_region[region]   = by_region.get(region, 0) + 1
+        by_category[cat]    = by_category.get(cat, 0) + 1
 
-    if "/resolve" in path and method == "POST":
-        alert_id = path_params.get("id")
-        if alert_id:
-            return resolve_alert(alert_id)
+        # Time bucketing
+        day_key = ts[:10] if ts else 'unknown'
+        by_day[day_key] = by_day.get(day_key, 0) + 1
 
-    return cors_response(404, {"error": "Route not found"})
+        if item.get('status', 'OPEN') == 'OPEN':
+            open_count += 1
+
+        if ts >= hour_ago:  last_hour += 1
+        if ts >= day_ago:   last_day  += 1
+        if ts >= week_ago:  last_week += 1
+
+    return {
+        'totalAlerts':     len(all_items),
+        'openAlerts':      open_count,
+        'lastHourAlerts':  last_hour,
+        'lastDayAlerts':   last_day,
+        'lastWeekAlerts':  last_week,
+        'criticalAlerts':  by_sev.get('CRITICAL', 0),
+        'highAlerts':      by_sev.get('HIGH', 0),
+        'bySeverity':      by_sev,
+        'byRegion':        dict(sorted(by_region.items(), key=lambda x: x[1], reverse=True)),
+        'byCategory':      dict(sorted(by_category.items(), key=lambda x: x[1], reverse=True)),
+        'byDay':           dict(sorted(by_day.items())),
+        'timestamp':       now.isoformat()
+    }
+
+
+def lambda_handler(event, context):
+    method = event.get('httpMethod', 'GET')
+    path   = event.get('path', '/')
+    params = event.get('queryStringParameters') or {}
+
+    logger.info(f"{method} {path} params={params}")
+
+    if method == 'OPTIONS':
+        return make_response(200, {})
+
+    try:
+        # GET /alerts
+        if path == '/alerts' and method == 'GET':
+            return make_response(200, get_alerts(params))
+
+        # POST /alerts/{id}/resolve
+        if path.startswith('/alerts/') and path.endswith('/resolve') and method == 'POST':
+            alert_id = path.split('/')[2]
+            result   = resolve_alert(alert_id)
+            if result:
+                return make_response(200, result)
+            return make_response(404, {'error': 'Alert not found'})
+
+        # GET /stats
+        if path == '/stats' and method == 'GET':
+            return make_response(200, get_stats())
+
+        # GET /health
+        if path == '/health':
+            return make_response(200, {
+                'status':    'healthy',
+                'service':   'Cloud Seeker API',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'version':   '4.0.0'
+            })
+
+        return make_response(404, {'error': f'Route not found: {method} {path}'})
+
+    except Exception as exc:
+        logger.error(f"Handler error: {exc}", exc_info=True)
+        return make_response(500, {'error': 'Internal server error', 'detail': str(exc)})
