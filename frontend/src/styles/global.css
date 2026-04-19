@@ -1210,3 +1210,234 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATED SIDEBAR NAV BUTTONS — add to bottom of global.css
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Ping animation for alert badge */
+@keyframes nav-ping {
+
+  75%,
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes nav-glow-pulse {
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes nav-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Reset old nav-item — replaced by new animated version */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all .2s;
+  margin-bottom: 6px;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 500;
+  user-select: none;
+  border: 1px solid transparent;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+}
+
+.nav-item:hover {
+  background: transparent;
+}
+
+.nav-item.active {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* The inner card that animates */
+.nav-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  width: 100%;
+  transition: background .2s, transform .15s;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.nav-item:hover .nav-inner {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: translateX(2px);
+}
+
+.nav-item.active .nav-inner {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Coloured icon box */
+.nav-icon-box {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  transition: transform .2s;
+}
+
+.nav-item:hover .nav-icon-box {
+  transform: scale(1.08);
+}
+
+.nav-item.active .nav-icon-box {
+  transform: scale(1.05);
+}
+
+.nav-icon-box svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Glow under icon */
+.nav-icon-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  opacity: 0;
+  transition: opacity .2s;
+  filter: blur(6px);
+}
+
+.nav-item:hover .nav-icon-glow,
+.nav-item.active .nav-icon-glow {
+  opacity: 0.6;
+  animation: nav-glow-pulse 2s ease-in-out infinite;
+}
+
+/* Label area */
+.nav-label-wrap {
+  flex: 1;
+  line-height: 1.25;
+}
+
+.nav-label-main {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t1);
+  display: block;
+}
+
+.nav-label-sub {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  display: block;
+  margin-top: 1px;
+}
+
+/* Right dots */
+.nav-dots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.nav-dot-1,
+.nav-dot-2,
+.nav-dot-3 {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transition: transform .2s;
+}
+
+.nav-item:hover .nav-dot-1 {
+  transform: scale(1.4);
+}
+
+.nav-item:hover .nav-dot-2 {
+  transform: scale(1.4);
+  transition-delay: .05s;
+}
+
+.nav-item:hover .nav-dot-3 {
+  transform: scale(1.4);
+  transition-delay: .1s;
+}
+
+/* Animated ping badge */
+.nav-ping-wrap {
+  position: relative;
+  margin-left: auto;
+}
+
+.nav-ping-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  animation: nav-ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.nav-ping-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: white;
+  z-index: 1;
+}
+
+/* Active left accent bar */
+.nav-item.active .nav-inner::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+}
