@@ -1441,3 +1441,335 @@ body {
   width: 3px;
   border-radius: 0 2px 2px 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATED KPI CARDS — append to bottom of global.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Outer wrapper — provides space for glow overflow */
+.kpi-anim-outer {
+  position: relative;
+  border-radius: 14px;
+}
+
+/* The glow blob behind the card */
+.kpi-glow-blob {
+  position: absolute;
+  inset: -8px;
+  border-radius: 20px;
+  transition: opacity .4s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Card surface */
+.kpi-anim-card {
+  position: relative;
+  z-index: 1;
+  background: #0D1523;
+  border: 1px solid rgba(255, 255, 255, .06);
+  border-radius: 14px;
+  padding: 1px;
+  /* makes room for shimmer lines */
+  overflow: hidden;
+  transition: border-color .3s, transform .25s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .4), 0 0 0 0 transparent;
+  cursor: default;
+}
+
+.kpi-anim-outer:hover .kpi-anim-card {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .5);
+}
+
+/* Top + bottom edge shimmer lines */
+.kpi-shimmer-top,
+.kpi-shimmer-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transition: opacity .4s;
+  pointer-events: none;
+}
+
+.kpi-shimmer-top {
+  top: 0;
+}
+
+.kpi-shimmer-bottom {
+  bottom: 0;
+}
+
+/* Inner flex row: content left, bars right */
+.kpi-anim-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 14px 14px;
+  background: linear-gradient(135deg, #0D1523 0%, #111a2e 100%);
+  border-radius: 13px;
+  flex: 1;
+}
+
+/* We wrap inner + right side in a flex row inside the card */
+.kpi-anim-card {
+  display: flex;
+  align-items: stretch;
+}
+
+.kpi-anim-right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 14px 0;
+  background: linear-gradient(135deg, #0D1523 0%, #111a2e 100%);
+  border-radius: 0 13px 13px 0;
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
+.kpi-anim-inner {
+  border-radius: 13px 0 0 13px;
+  flex: 1;
+}
+
+/* Top row inside inner */
+.kpi-anim-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Icon wrapper */
+.kpi-anim-icon-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.kpi-icon-glow {
+  position: absolute;
+  inset: -4px;
+  border-radius: 12px;
+  transition: box-shadow .3s;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.kpi-anim-icon {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Label area */
+.kpi-anim-label-area {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kpi-anim-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  white-space: nowrap;
+}
+
+/* Big value */
+.kpi-anim-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+
+/* Mini bars */
+.kpi-mini-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 36px;
+}
+
+.kpi-mini-bar-track {
+  width: 7px;
+  height: 100%;
+  background: rgba(255, 255, 255, .05);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.kpi-mini-bar-fill {
+  width: 100%;
+  border-radius: 3px;
+  transition: height .8s cubic-bezier(.4, 0, .2, 1), background .3s;
+}
+
+/* Trend row */
+.kpi-anim-trend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.kpi-trend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATED PILL FILTER BUTTONS — append to bottom of global.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Filter bar container */
+.filter-bar-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+/* Each pill button */
+.pill-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #94A3B8;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 45px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .2);
+  transition:
+    transform .28s cubic-bezier(.34, 1.56, .64, 1),
+    box-shadow .28s ease,
+    color .2s ease,
+    border-color .2s ease,
+    background .2s ease;
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--ui);
+}
+
+/* Bottom glow shimmer line */
+.pill-btn-glow {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  border-radius: 0 0 45px 45px;
+  transition: opacity .3s;
+  pointer-events: none;
+}
+
+/* Active severity dot */
+.pill-btn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: pill-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pill-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: .6;
+    transform: scale(.75);
+  }
+}
+
+/* Text label */
+.pill-btn-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* Count badge inside button */
+.pill-btn-count {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid;
+  font-family: var(--mono);
+  transition: background .2s, color .2s, border-color .2s;
+}
+
+/* Active state base */
+.pill-btn-active {
+  font-weight: 700;
+}
+
+/* Refresh pill — different style, right-aligned */
+.refresh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: #4B6280;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .2s;
+  margin-left: auto;
+  font-family: var(--ui);
+  outline: none;
+}
+
+.refresh-pill:hover {
+  background: rgba(255, 255, 255, .06);
+  color: #94A3B8;
+  border-color: rgba(255, 255, 255, .12);
+}
+
+.refresh-pill svg {
+  flex-shrink: 0;
+}

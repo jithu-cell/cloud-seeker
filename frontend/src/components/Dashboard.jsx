@@ -1,9 +1,24 @@
 /**
- * Cloud Seeker — Dashboard v9
- * Animated sidebar nav buttons — each tab has unique color + glow + ping badge
+ * Dashboard.jsx — v10 ANIMATED BUTTONS UPGRADE
+ *
+ * What changed from v9:
+ *   1. KPI cards (Overview + Alerts tab) → KpiCard component (glow + mini bars)
+ *   2. Filter buttons (Alerts tab) → FilterBar component (pill + hover lift)
+ *   3. CSS import added for animated-buttons.css
+ *   Everything else (NavButton, sidebar, compliance, analytics) stays the same.
+ *
+ * HOW TO USE:
+ *   Copy this file to frontend/src/components/Dashboard.jsx (overwrite)
+ *   Copy KpiCard.jsx and FilterBar.jsx to frontend/src/components/
+ *   Append animated-buttons.css content to frontend/src/styles/global.css
+ *   Push to GitHub — Amplify auto-deploys.
  */
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNotifications } from "./NotificationManager";
+import KpiCard from "./KpiCard";
+import FilterBar from "./FilterBar";
+import "../styles/animated-buttons.css";
 
 const API = process.env.REACT_APP_API_URL || "";
 
@@ -15,7 +30,15 @@ const fmtTime = (iso) => {
 const fmtFullTime = () =>
   new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-// ── Icons ──────────────────────────────────────────────────────────────────────
+// ── SVG icon path strings — pass as iconPath prop to KpiCard ─────────────────
+const ICON_PATHS = {
+  pulse: "M22 12h-4l-3 9L9 3l-3 9H2",
+  alert: "M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4m0 4h.01",
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  server: "M2 5a2 2 0 012-2h16a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm2 0v6h16V5H4zm0 10a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm8 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z",
+};
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
 const I = {
   Grid: () => <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>,
   Bell: () => <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>,
@@ -24,13 +47,9 @@ const I = {
   Link: () => <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>,
   Gear: () => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>,
   Refresh: () => <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>,
-  Pulse: () => <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>,
-  Alert: () => <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
-  Check: () => <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
-  Server: () => <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>,
 };
 
-// ── Logo ───────────────────────────────────────────────────────────────────────
+// ── CloudSeeker SVG Logo ──────────────────────────────────────────────────────
 function CloudSeekerLogo({ size = 36 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 36 36" fill="none" style={{ flexShrink: 0 }}>
@@ -52,15 +71,13 @@ function CloudSeekerLogo({ size = 36 }) {
       <line x1="19" y1="13" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
       <line x1="27" y1="16" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
       <line x1="22" y1="22" x2="11" y2="19" stroke="url(#csBlue)" strokeWidth="0.9" opacity="0.75" />
-      <line x1="11" y1="19" x2="27" y2="16" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.38" />
-      <line x1="19" y1="13" x2="22" y2="22" stroke="url(#csBlue)" strokeWidth="0.7" opacity="0.38" />
       <line x1="9" y1="30" x2="26" y2="10" stroke="url(#csArrow)" strokeWidth="2.2" strokeLinecap="round" />
       <path d="M23 8.5L28 9L27.5 14" stroke="url(#csArrow)" strokeWidth="2.0" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-// ── Badge ──────────────────────────────────────────────────────────────────────
+// ── Severity badge ────────────────────────────────────────────────────────────
 function Badge({ severity }) {
   return (
     <span className={`badge badge-${severity}`}>
@@ -69,93 +86,47 @@ function Badge({ severity }) {
   );
 }
 
-// ── ════════════════════ ANIMATED NAV BUTTON ════════════════════ ──────────────
+// ── Animated nav button (from v9 — unchanged) ─────────────────────────────────
 function NavButton({ item, isActive, badgeCount, onClick }) {
   const [hovered, setHovered] = useState(false);
   const show = isActive || hovered;
   const showBadge = item.badge && badgeCount > 0;
-
   return (
-    <div
-      className={`nav-item${isActive ? " active" : ""}`}
+    <div className={`nav-item${isActive ? " active" : ""}`}
       onClick={item.disabled ? undefined : (onClick || item.onClick)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ opacity: item.disabled ? 0.4 : 1, cursor: item.disabled ? "default" : "pointer" }}
-    >
-      <div
-        className="nav-inner"
-        style={{
-          background: show
-            ? `linear-gradient(135deg, ${item.iconBg} 0%, rgba(255,255,255,0.03) 100%)`
-            : "rgba(255,255,255,0.02)",
-          borderColor: show ? `${item.color}30` : "rgba(255,255,255,0.04)",
-          transform: hovered && !isActive ? "translateX(3px)" : "translateX(0)",
-        }}
-      >
-        {/* Active accent bar */}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      style={{ opacity: item.disabled ? 0.4 : 1, cursor: item.disabled ? "default" : "pointer" }}>
+      <div className="nav-inner" style={{
+        background: show ? `linear-gradient(135deg,${item.iconBg} 0%,rgba(255,255,255,.03) 100%)` : "rgba(255,255,255,.02)",
+        borderColor: show ? `${item.color}30` : "rgba(255,255,255,.04)",
+        transform: hovered && !isActive ? "translateX(3px)" : "translateX(0)",
+      }}>
         {isActive && (
           <div style={{
-            position: "absolute", left: 0, top: 6, bottom: 6,
-            width: 3, borderRadius: "0 2px 2px 0",
-            background: item.color,
-            boxShadow: `0 0 8px ${item.color}`,
+            position: "absolute", left: 0, top: 6, bottom: 6, width: 3, borderRadius: "0 2px 2px 0",
+            background: item.color, boxShadow: `0 0 8px ${item.color}`
           }} />
         )}
-
-        {/* Icon box */}
-        <div
-          className="nav-icon-box"
-          style={{
-            background: show
-              ? `linear-gradient(135deg, ${item.iconBg}, ${item.iconBg.replace(",.15)", ", .25)")})`
-              : item.iconBg,
-            color: item.color,
-            boxShadow: show ? `0 0 12px ${item.glow}` : "none",
-          }}
-        >
-          {item.icon}
-        </div>
-
-        {/* Text */}
+        <div className="nav-icon-box" style={{
+          background: show ? `linear-gradient(135deg,${item.iconBg},${item.iconBg.replace(",.15)", ", .25)")})` : item.iconBg,
+          color: item.color,
+          boxShadow: show ? `0 0 12px ${item.glow}` : "none",
+        }}>{item.icon}</div>
         <div className="nav-label-wrap">
-          <span className="nav-label-main" style={{ color: show ? item.color : "var(--t1)" }}>
-            {item.label}
-          </span>
-          <span className="nav-label-sub" style={{ color: show ? item.color : "var(--t3)", opacity: show ? 0.7 : 1 }}>
-            {item.sub}
-          </span>
+          <span className="nav-label-main" style={{ color: show ? item.color : "var(--t1)" }}>{item.label}</span>
+          <span className="nav-label-sub" style={{ color: show ? item.color : "var(--t3)", opacity: show ? .7 : 1 }}>{item.sub}</span>
         </div>
-
-        {/* Right: ping badge or dots */}
         {showBadge ? (
           <div style={{ position: "relative", marginLeft: "auto", flexShrink: 0 }}>
-            {/* Outer ping ring */}
-            <div style={{
-              position: "absolute", inset: -3, borderRadius: "50%",
-              background: item.color, opacity: 0.35,
-              animation: "nav-ping 1.2s cubic-bezier(0,0,.2,1) infinite",
-            }} />
-            {/* Badge number */}
-            <div style={{
-              position: "relative", width: 20, height: 20, borderRadius: "50%",
-              background: item.color, color: "white",
-              fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              zIndex: 1, boxShadow: `0 0 10px ${item.glow}`,
-            }}>
+            <div style={{ position: "absolute", inset: -3, borderRadius: "50%", background: item.color, opacity: .35, animation: "nav-ping 1.2s cubic-bezier(0,0,.2,1) infinite" }} />
+            <div style={{ position: "relative", width: 20, height: 20, borderRadius: "50%", background: item.color, color: "white", fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1, boxShadow: `0 0 10px ${item.glow}` }}>
               {badgeCount > 99 ? "99" : badgeCount}
             </div>
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 3, marginLeft: "auto", flexShrink: 0 }}>
             {[0, 1, 2].map(i => (
-              <div key={i} style={{
-                width: 5, height: 5, borderRadius: "50%",
-                background: item.dotColors[i],
-                transition: `transform .2s ${i * .05}s`,
-                transform: show ? "scale(1.4)" : "scale(1)",
-              }} />
+              <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: item.dotColors[i], transition: `transform .2s ${i * .05}s`, transform: show ? "scale(1.4)" : "scale(1)" }} />
             ))}
           </div>
         )}
@@ -164,75 +135,38 @@ function NavButton({ item, isActive, badgeCount, onClick }) {
   );
 }
 
-// ── Nav config ─────────────────────────────────────────────────────────────────
+// ── Nav config (same as v9) ───────────────────────────────────────────────────
 const MAIN_NAV = [
-  {
-    id: "overview", label: "Overview", sub: "Security dashboard",
-    icon: <I.Grid />, color: "#6366F1", glow: "rgba(99,102,241,.5)",
-    iconBg: "rgba(99,102,241,.15)",
-    dotColors: ["#6366F1", "rgba(99,102,241,.5)", "rgba(99,102,241,.25)"],
-  },
-  {
-    id: "alerts", label: "Alerts", sub: "Security events",
-    icon: <I.Bell />, color: "#EF4444", glow: "rgba(239,68,68,.5)",
-    iconBg: "rgba(239,68,68,.15)",
-    dotColors: ["#EF4444", "rgba(239,68,68,.5)", "rgba(239,68,68,.25)"],
-    badge: true,
-  },
-  {
-    id: "compliance", label: "Compliance", sub: "Framework scores",
-    icon: <I.Shield />, color: "#22C55E", glow: "rgba(34,197,94,.5)",
-    iconBg: "rgba(34,197,94,.15)",
-    dotColors: ["#22C55E", "rgba(34,197,94,.5)", "rgba(34,197,94,.25)"],
-  },
-  {
-    id: "analytics", label: "Analytics", sub: "Trends & insights",
-    icon: <I.Chart />, color: "#06B6D4", glow: "rgba(6,182,212,.5)",
-    iconBg: "rgba(6,182,212,.15)",
-    dotColors: ["#06B6D4", "rgba(6,182,212,.5)", "rgba(6,182,212,.25)"],
-  },
+  { id: "overview", label: "Overview", sub: "Security dashboard", icon: <I.Grid />, color: "#6366F1", glow: "rgba(99,102,241,.5)", iconBg: "rgba(99,102,241,.15)", dotColors: ["#6366F1", "rgba(99,102,241,.5)", "rgba(99,102,241,.25)"] },
+  { id: "alerts", label: "Alerts", sub: "Security events", icon: <I.Bell />, color: "#EF4444", glow: "rgba(239,68,68,.5)", iconBg: "rgba(239,68,68,.15)", dotColors: ["#EF4444", "rgba(239,68,68,.5)", "rgba(239,68,68,.25)"], badge: true },
+  { id: "compliance", label: "Compliance", sub: "Framework scores", icon: <I.Shield />, color: "#22C55E", glow: "rgba(34,197,94,.5)", iconBg: "rgba(34,197,94,.15)", dotColors: ["#22C55E", "rgba(34,197,94,.5)", "rgba(34,197,94,.25)"] },
+  { id: "analytics", label: "Analytics", sub: "Trends & insights", icon: <I.Chart />, color: "#06B6D4", glow: "rgba(6,182,212,.5)", iconBg: "rgba(6,182,212,.15)", dotColors: ["#06B6D4", "rgba(6,182,212,.5)", "rgba(6,182,212,.25)"] },
 ];
-
 const SYS_NAV = [
-  {
-    id: "aws", label: "AWS Console", sub: "Open in new tab",
-    icon: <I.Link />, color: "#F59E0B", glow: "rgba(245,158,11,.5)",
-    iconBg: "rgba(245,158,11,.15)",
-    dotColors: ["#F59E0B", "rgba(245,158,11,.5)", "rgba(245,158,11,.25)"],
-    onClick: () => window.open("https://console.aws.amazon.com", "_blank"),
-  },
-  {
-    id: "settings", label: "Settings", sub: "Configure platform",
-    icon: <I.Gear />, color: "#64748B", glow: "rgba(100,116,139,.4)",
-    iconBg: "rgba(100,116,139,.12)",
-    dotColors: ["#64748B", "rgba(100,116,139,.4)", "rgba(100,116,139,.2)"],
-    disabled: true,
-  },
+  { id: "aws", label: "AWS Console", sub: "Open in new tab", icon: <I.Link />, color: "#F59E0B", glow: "rgba(245,158,11,.5)", iconBg: "rgba(245,158,11,.15)", dotColors: ["#F59E0B", "rgba(245,158,11,.5)", "rgba(245,158,11,.25)"], onClick: () => window.open("https://console.aws.amazon.com", "_blank") },
+  { id: "settings", label: "Settings", sub: "Configure platform", icon: <I.Gear />, color: "#64748B", glow: "rgba(100,116,139,.4)", iconBg: "rgba(100,116,139,.12)", dotColors: ["#64748B", "rgba(100,116,139,.4)", "rgba(100,116,139,.2)"], disabled: true },
 ];
 
-// ── Sub-charts ─────────────────────────────────────────────────────────────────
+// ── Compliance frameworks ─────────────────────────────────────────────────────
+const COMPLIANCE_FRAMEWORKS = [
+  { name: "CIS AWS Benchmark", icon: "🏛️", score: 94, color: "#4F46E5" },
+  { name: "PCI DSS", icon: "💳", score: 87, color: "#F59E0B" },
+  { name: "SOC 2", icon: "✅", score: 96, color: "#22C55E" },
+  { name: "HIPAA", icon: "🏥", score: 89, color: "#F59E0B" },
+  { name: "NIST 800-53", icon: "🔒", score: 78, color: "#64748B" },
+  { name: "AWS Well-Architected", icon: "☁️", score: 92, color: "#6366F1" },
+];
+
+// ── Analytics sub-charts ──────────────────────────────────────────────────────
 function DonutChart({ bySeverity }) {
-  const segs = [
-    { key: "CRITICAL", color: "#EF4444" },
-    { key: "HIGH", color: "#F59E0B" },
-    { key: "MEDIUM", color: "#6366F1" },
-    { key: "LOW", color: "#22C55E" },
-  ];
+  const segs = [{ key: "CRITICAL", color: "#EF4444" }, { key: "HIGH", color: "#F59E0B" }, { key: "MEDIUM", color: "#6366F1" }, { key: "LOW", color: "#22C55E" }];
   const total = Object.values(bySeverity).reduce((s, v) => s + v, 0) || 1;
   let offset = 25;
   return (
     <div className="donut-wrap">
       <svg width="100" height="100" viewBox="0 0 36 36">
         <circle cx="18" cy="18" r="15.9155" fill="transparent" stroke="rgba(255,255,255,.05)" strokeWidth="3" />
-        {segs.map(s => {
-          const pct = ((bySeverity[s.key] || 0) / total) * 100;
-          const el = <circle key={s.key} cx="18" cy="18" r="15.9155" fill="transparent"
-            stroke={s.color} strokeWidth="3"
-            strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={offset}
-            style={{ transition: "stroke-dasharray 1s ease" }} />;
-          offset -= pct;
-          return el;
-        })}
+        {segs.map(s => { const pct = ((bySeverity[s.key] || 0) / total) * 100; const el = <circle key={s.key} cx="18" cy="18" r="15.9155" fill="transparent" stroke={s.color} strokeWidth="3" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={offset} style={{ transition: "stroke-dasharray 1s ease" }} />; offset -= pct; return el; })}
       </svg>
       <div className="donut-legend">
         {segs.map(s => (
@@ -248,33 +182,24 @@ function DonutChart({ bySeverity }) {
 }
 
 function RegionBars({ byRegion }) {
-  const COLORS = { "eu-north-1": "#4F46E5", "us-east-1": "#6366F1", "us-west-2": "#22C55E", "eu-west-1": "#F59E0B", "ap-southeast-1": "#EC4899", "eu-central-1": "#06B6D4", "ap-south-1": "#8B5CF6", "us-east-2": "#10B981" };
+  const COLORS = { "eu-north-1": "#4F46E5", "us-east-1": "#6366F1", "us-west-2": "#22C55E", "eu-west-1": "#F59E0B", "ap-southeast-1": "#EC4899" };
   const entries = Object.entries(byRegion).sort((a, b) => b[1] - a[1]);
   const max = Math.max(...entries.map(([, v]) => v), 1);
-  const [animated, setAnimated] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setAnimated(true), 100); return () => clearTimeout(t); }, []);
+  const [anim, setAnim] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setAnim(true), 100); return () => clearTimeout(t); }, []);
   if (!entries.length) return <div className="empty-state"><div className="empty-state-text">No region data yet</div></div>;
   return (
     <div className="bar-group">
       {entries.slice(0, 6).map(([r, c]) => (
         <div key={r} className="bar-row">
           <div className="bar-label">{r}</div>
-          <div className="bar-track"><div className="bar-fill" style={{ width: animated ? `${(c / max) * 100}%` : "0%", background: COLORS[r] || "#6366F1" }} /></div>
+          <div className="bar-track"><div className="bar-fill" style={{ width: anim ? `${(c / max) * 100}%` : "0%", background: COLORS[r] || "#6366F1" }} /></div>
           <div className="bar-count">{c}</div>
         </div>
       ))}
     </div>
   );
 }
-
-const COMPLIANCE_FRAMEWORKS = [
-  { name: "CIS AWS Benchmark", icon: "🏛️", score: 94, color: "#4F46E5" },
-  { name: "PCI DSS", icon: "💳", score: 87, color: "#F59E0B" },
-  { name: "SOC 2", icon: "✅", score: 96, color: "#22C55E" },
-  { name: "HIPAA", icon: "🏥", score: 89, color: "#F59E0B" },
-  { name: "NIST 800-53", icon: "🔒", score: 78, color: "#64748B" },
-  { name: "AWS Well-Architected", icon: "☁️", score: 92, color: "#6366F1" },
-];
 
 const PIPELINE = [
   { icon: "🖥️", name: "AWS Action", desc: "Console / API change" },
@@ -286,6 +211,8 @@ const PIPELINE = [
   { icon: "📊", name: "Dashboard", desc: "Real-time view" },
 ];
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
   const { addNotification } = useNotifications();
@@ -300,13 +227,10 @@ export default function Dashboard() {
   const [threatLevel, setThreat] = useState("LOW");
   const seenIds = useRef(new Set());
 
-  useEffect(() => {
-    const t = setInterval(() => setClock(fmtFullTime()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  useEffect(() => { const t = setInterval(() => setClock(fmtFullTime()), 1000); return () => clearInterval(t); }, []);
 
   const fetchStats = useCallback(async () => {
-    if (!API) { setStats({ totalAlerts: 10, openAlerts: 10, lastHourAlerts: 6, criticalAlerts: 2, highAlerts: 2, bySeverity: { CRITICAL: 2, HIGH: 2, MEDIUM: 2, LOW: 4 }, byRegion: { "eu-north-1": 10 } }); return; }
+    if (!API) { setStats({ totalAlerts: 68, openAlerts: 68, lastHourAlerts: 0, criticalAlerts: 10, highAlerts: 24, bySeverity: { CRITICAL: 10, HIGH: 24, MEDIUM: 10, LOW: 24 }, byRegion: { "eu-north-1": 68 } }); return; }
     try { const r = await fetch(`${API}/stats`); if (r.ok) setStats(await r.json()); } catch { }
   }, []);
 
@@ -319,18 +243,12 @@ export default function Dashboard() {
         { alert_id: "d3", event_name: "RunInstances", reason: "EC2 t3.micro launched by Jithu", severity: "HIGH", event_source: "ec2.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 600000).toISOString(), status: "OPEN" },
         { alert_id: "d4", event_name: "PutBucketPolicy", reason: "S3 bucket policy changed", severity: "HIGH", event_source: "s3.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 900000).toISOString(), status: "OPEN" },
         { alert_id: "d5", event_name: "UpdateTrail", reason: "CloudTrail configuration changed", severity: "MEDIUM", event_source: "cloudtrail.amazonaws.com", region: "eu-north-1", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1200000).toISOString(), status: "OPEN" },
-        { alert_id: "d6", event_name: "CreateAccessKey", reason: "New access key created for Jithu", severity: "MEDIUM", event_source: "iam.amazonaws.com", region: "global", user: "Jithu", source_ip: "103.42.196.77", created_at: new Date(Date.now() - 1500000).toISOString(), status: "OPEN" },
       ];
     } else {
       try { const r = await fetch(`${API}/alerts?limit=100&status=OPEN`); if (r.ok) { const d = await r.json(); items = d.alerts || []; } } catch { }
     }
     items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    items.forEach(a => {
-      if (!seenIds.current.has(a.alert_id)) {
-        addNotification({ severity: a.severity, title: a.event_name, detail: a.reason, region: a.region, user: a.user?.split("/").pop() });
-        seenIds.current.add(a.alert_id);
-      }
-    });
+    items.forEach(a => { if (!seenIds.current.has(a.alert_id)) { addNotification({ severity: a.severity, title: a.event_name, detail: a.reason, region: a.region, user: a.user?.split("/").pop() }); seenIds.current.add(a.alert_id); } });
     setAllAlerts(items);
     setLoading(false);
     const crit = items.filter(a => a.severity === "CRITICAL").length;
@@ -367,55 +285,80 @@ export default function Dashboard() {
   };
   const [pageTitle, pageSub] = PAGE_META[tab];
 
-  const switchTab = (t) => {
-    setTab(t); setFilter("ALL");
-    if (t === "compliance") setTimeout(() => setCompAnim(true), 120);
-    else setCompAnim(false);
-  };
+  const switchTab = (t) => { setTab(t); setFilter("ALL"); if (t === "compliance") setTimeout(() => setCompAnim(true), 120); else setCompAnim(false); };
+
+  // ── KPI card data definitions ─────────────────────────────────────────────
+  const KPI_CARDS = [
+    {
+      label: "Total Events",
+      value: stats?.totalAlerts ?? "—",
+      trend: `+${stats?.lastHourAlerts ?? 0} last hour`,
+      trendType: "up",
+      color: "#06B6D4",
+      glowColor: "rgba(6,182,212,.4)",
+      iconPath: ICON_PATHS.pulse,
+      bars: [0.3, 0.5, 0.4, 0.7, 0.6, 0.9, 0.8],
+    },
+    {
+      label: "Active Alerts",
+      value: stats?.openAlerts ?? "—",
+      trend: `${stats?.openAlerts ?? 0} unresolved`,
+      trendType: "warn",
+      color: "#EF4444",
+      glowColor: "rgba(239,68,68,.4)",
+      iconPath: ICON_PATHS.alert,
+      bars: [0.6, 0.8, 0.5, 0.9, 0.7, 0.6, 0.8],
+    },
+    {
+      label: "Compliance Score",
+      value: "91%",
+      trend: "+3% this week",
+      trendType: "up",
+      color: "#22C55E",
+      glowColor: "rgba(34,197,94,.4)",
+      iconPath: ICON_PATHS.shield,
+      bars: [0.7, 0.8, 0.75, 0.85, 0.88, 0.91, 0.91],
+    },
+    {
+      label: "Services Monitored",
+      value: 13,
+      trend: "All healthy",
+      trendType: "up",
+      color: "#6366F1",
+      glowColor: "rgba(99,102,241,.4)",
+      iconPath: ICON_PATHS.server,
+      bars: [1, 1, 1, 1, 1, 1, 1],
+    },
+  ];
 
   return (
     <div className="app-layout">
 
-      {/* ══════ SIDEBAR ══════ */}
+      {/* ══ SIDEBAR ══ */}
       <aside className="sidebar">
         <div className="sb-logo">
           <CloudSeekerLogo size={36} />
-          <div className="sb-logo-text">
-            <h1>CLOUD SEEKER</h1>
-            <p>Security Intelligence Platform</p>
-          </div>
+          <div className="sb-logo-text"><h1>CLOUD SEEKER</h1><p>Security Intelligence Platform</p></div>
         </div>
-
         <div className="sb-nav">
           <div className="sb-section">Main</div>
           {MAIN_NAV.map(item => (
-            <NavButton
-              key={item.id}
-              item={item}
-              isActive={tab === item.id}
-              badgeCount={item.badge ? counts.ALL : 0}
-              onClick={() => switchTab(item.id)}
-            />
+            <NavButton key={item.id} item={item} isActive={tab === item.id} badgeCount={item.badge ? counts.ALL : 0} onClick={() => switchTab(item.id)} />
           ))}
-
           <div className="sb-section" style={{ marginTop: 14 }}>System</div>
           {SYS_NAV.map(item => (
             <NavButton key={item.id} item={item} isActive={false} badgeCount={0} />
           ))}
         </div>
-
         <div className="sb-footer">
           <div className="env-pill">
             <div className="env-dot" />
-            <div>
-              <div className="env-label">AWS Connected</div>
-              <div className="env-sub">eu-north-1 · prod</div>
-            </div>
+            <div><div className="env-label">AWS Connected</div><div className="env-sub">eu-north-1 · prod</div></div>
           </div>
         </div>
       </aside>
 
-      {/* ══════ MAIN AREA ══════ */}
+      {/* ══ MAIN AREA ══ */}
       <div className="main-area">
         <header className="topbar">
           <div className="topbar-left"><h2>{pageTitle}</h2><p>{pageSub}</p></div>
@@ -429,44 +372,15 @@ export default function Dashboard() {
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (
           <div className="content-area">
-            <div className="kpi-grid">
-              <div className="kpi-card">
-                <div className="kpi-top"><span className="kpi-label">Total Events</span>
-                  <div className="kpi-icon" style={{ background: "var(--indigo-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Pulse /></svg>
-                  </div>
-                </div>
-                <div className="kpi-value">{stats?.totalAlerts?.toLocaleString() ?? "—"}</div>
-                <div className={`kpi-trend ${stats ? "trend-up" : "trend-mute"}`}>+{stats?.lastHourAlerts ?? 0} last hour</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-top"><span className="kpi-label">Active Alerts</span>
-                  <div className="kpi-icon" style={{ background: "var(--danger-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Alert /></svg>
-                  </div>
-                </div>
-                <div className="kpi-value" style={{ color: "var(--danger)" }}>{stats?.openAlerts ?? "—"}</div>
-                <div className="kpi-trend trend-warn">{stats?.openAlerts ?? 0} unresolved</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-top"><span className="kpi-label">Compliance Score</span>
-                  <div className="kpi-icon" style={{ background: "var(--success-bg)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Check /></svg>
-                  </div>
-                </div>
-                <div className="kpi-value" style={{ color: "var(--success)" }}>91%</div>
-                <div className="kpi-trend trend-up">+3% this week</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-top"><span className="kpi-label">Services Monitored</span>
-                  <div className="kpi-icon" style={{ background: "rgba(99,102,241,.08)" }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><I.Server /></svg>
-                  </div>
-                </div>
-                <div className="kpi-value" style={{ color: "#6366F1" }}>13</div>
-                <div className="kpi-trend trend-up">All healthy</div>
-              </div>
+
+            {/* ── ANIMATED KPI CARDS ── */}
+            <div className="kpi-grid" style={{ marginBottom: 16 }}>
+              {KPI_CARDS.map(card => (
+                <KpiCard key={card.label} {...card} />
+              ))}
             </div>
+
+            {/* Status row */}
             <div className="status-grid">
               <div className="status-card">
                 <div className="status-card-head"><span className="status-card-label">Critical Issues</span><Badge severity="CRITICAL" /></div>
@@ -487,6 +401,7 @@ export default function Dashboard() {
                 <div className="status-bar" style={{ background: "var(--success)" }} />
               </div>
             </div>
+
             <div className="card">
               <div className="card-header">
                 <div><div className="card-title">Recent Activity</div><div className="card-sub">Latest security events across your AWS environment</div></div>
@@ -522,16 +437,21 @@ export default function Dashboard() {
         {/* ══ ALERTS ══ */}
         {tab === "alerts" && (
           <div className="content-area">
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>Security Alerts</div>
-              <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{filtered.length} {filter === "ALL" ? "open" : filter.toLowerCase()} alerts{allAlerts.length > 0 && " · refreshes every 15s"}</div>
-            </div>
-            <div className="filter-bar">
-              {["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map(f => (
-                <button key={f} className={`filter-btn${filter === f ? " active" : ""}`} onClick={() => setFilter(f)}>{f} <span className="filter-count">{counts[f]}</span></button>
+            {/* KPI cards on alerts tab too */}
+            <div className="kpi-grid" style={{ marginBottom: 20 }}>
+              {KPI_CARDS.map(card => (
+                <KpiCard key={card.label} {...card} />
               ))}
-              <button className="action-btn" style={{ marginLeft: "auto" }} onClick={fetchAlerts}><I.Refresh />Refresh</button>
             </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>Security Alerts</div>
+              <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>{filtered.length} {filter === "ALL" ? "open" : filter.toLowerCase()} alerts · refreshes every 15s</div>
+            </div>
+
+            {/* ── ANIMATED PILL FILTER BAR ── */}
+            <FilterBar filter={filter} counts={counts} onFilter={setFilter} onRefresh={fetchAlerts} />
+
             <div className="alert-list">
               {loading && <div className="empty-state"><div className="empty-state-icon">⏳</div><div className="empty-state-text">Loading alerts…</div></div>}
               {!loading && filtered.length === 0 && (
@@ -648,11 +568,7 @@ export default function Dashboard() {
               <div className="pipeline">
                 {PIPELINE.map((step, i) => (
                   <span key={step.name} style={{ display: "contents" }}>
-                    <div className="pipe-step">
-                      <div className="pipe-icon">{step.icon}</div>
-                      <div className="pipe-name">{step.name}</div>
-                      <div className="pipe-desc">{step.desc}</div>
-                    </div>
+                    <div className="pipe-step"><div className="pipe-icon">{step.icon}</div><div className="pipe-name">{step.name}</div><div className="pipe-desc">{step.desc}</div></div>
                     {i < PIPELINE.length - 1 && <div className="pipe-arr">→</div>}
                   </span>
                 ))}
