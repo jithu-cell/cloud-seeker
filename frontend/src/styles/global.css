@@ -2190,3 +2190,14 @@ body {
 .status-card[data-v="ok"]::before {
   background: linear-gradient(135deg, #065F46, #22C55E);
 }
+
+/* Cloud Seeker — Login spinner animation */
+@keyframes cs-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
