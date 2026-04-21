@@ -240,8 +240,8 @@ export default function IntroScreen({ onComplete }) {
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.1)",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.2)",
     borderRadius: "10px",
     padding: "10px 14px",
     color: "rgba(255,255,255,0.6)",
@@ -357,13 +357,13 @@ export default function IntroScreen({ onComplete }) {
 
           {/* Glass card */}
           <div style={{
-            background: "rgba(10,15,30,0.82)",
-            backdropFilter: "blur(24px)",
-            WebkitBackdropFilter: "blur(24px)",
-            border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.05)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.18)",
             borderRadius: "20px",
             padding: "32px 28px 28px",
-            boxShadow: "0 25px 80px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.15)",
           }}>
 
             {/* Card header */}

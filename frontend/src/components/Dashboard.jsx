@@ -3,6 +3,7 @@
  * Animated filter pills + animated KPI metric cards + animated status cards
  */
 import { useState, useEffect, useRef, useCallback } from "react";
+import { signOut } from "aws-amplify/auth";
 import { useNotifications } from "./NotificationManager";
 
 const API = process.env.REACT_APP_API_URL || "";
@@ -366,6 +367,37 @@ export default function Dashboard() {
             <div className="env-dot" />
             <div><div className="env-label">AWS Connected</div><div className="env-sub">eu-north-1 · prod</div></div>
           </div>
+          <button
+            onClick={async () => {
+              await signOut();
+              window.location.reload();
+            }}
+            style={{
+              marginTop: 8,
+              width: "100%",
+              padding: "9px",
+              borderRadius: "8px",
+              border: "1px solid rgba(239,68,68,0.25)",
+              background: "rgba(239,68,68,0.08)",
+              color: "#F87171",
+              fontSize: "12px",
+              fontWeight: 600,
+              fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+              cursor: "pointer",
+              letterSpacing: "0.04em",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = "rgba(239,68,68,0.18)";
+              e.target.style.borderColor = "rgba(239,68,68,0.5)";
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = "rgba(239,68,68,0.08)";
+              e.target.style.borderColor = "rgba(239,68,68,0.25)";
+            }}
+          >
+            ⏻ &nbsp;Logout
+          </button>
         </div>
       </aside>
 
