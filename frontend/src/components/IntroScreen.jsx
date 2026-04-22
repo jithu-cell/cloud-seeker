@@ -10,7 +10,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { signIn, signUp, confirmSignUp, resetPassword } from "aws-amplify/auth";
+import { signIn, signUp, confirmSignUp, resetPassword, signOut } from "aws-amplify/auth";
 
 // ── Logo (unchanged from v2) ──────────────────────────────────────────────────
 function CSLogo({ size = 56 }) {
@@ -131,6 +131,7 @@ export default function IntroScreen({ onComplete }) {
     setLoading(true);
     setError("");
     try {
+      try { await signOut(); } catch { }
       await signIn({ username: username.trim(), password });
       // ✅ Login successful → fade out and show dashboard
       setSuccess("Access granted. Entering Cloud Seeker…");
