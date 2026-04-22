@@ -1,18 +1,11 @@
 /**
- * Cloud Seeker — IntroScreen v3 (LOGIN GATE)
- * ─────────────────────────────────────────────────────────────────────────────
- * Video plays fullscreen + loops.
- * Login form floats on top — admin must authenticate before entering dashboard.
- * Uses AWS Amplify (Cognito) for auth.
- *
- * Props:
- *   onComplete() — called after successful login (triggers dashboard reveal)
+ * Cloud Seeker — IntroScreen v3 UPDATED
+ * Flow: Video fully visible → glowing button → click → form slides up → dashboard
  */
 
 import { useState, useRef, useEffect } from "react";
 import { signIn, signUp, confirmSignUp, resetPassword, signOut } from "aws-amplify/auth";
 
-// ── Logo (unchanged from v2) ──────────────────────────────────────────────────
 function CSLogo({ size = 56 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 36 36" fill="none">
@@ -47,7 +40,6 @@ function CSLogo({ size = 56 }) {
   );
 }
 
-// ── Lock icon SVG ─────────────────────────────────────────────────────────────
 function LockIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -56,7 +48,6 @@ function LockIcon() {
   );
 }
 
-// ── User icon SVG ─────────────────────────────────────────────────────────────
 function UserIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -65,7 +56,6 @@ function UserIcon() {
   );
 }
 
-// ── Email icon SVG ────────────────────────────────────────────────────────────
 function EmailIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -74,70 +64,53 @@ function EmailIcon() {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// VIEW MODES:  "login" | "signup" | "confirm" | "forgot" | "success"
-// ═════════════════════════════════════════════════════════════════════════════
 export default function IntroScreen({ onComplete }) {
   const videoRef = useRef(null);
+
+  // ── NEW: 3 phases — "idle" (video only), "button" (btn visible), "form" (form visible)
+  const [phase, setPhase] = useState("idle");
   const [logoIn, setLogoIn] = useState(false);
-  const [formIn, setFormIn] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
 
-  // ── Auth form state ──────────────────────────────────────────────────────
-  const [view, setView] = useState("login"); // login | signup | confirm | forgot
+  // form state (unchanged)
+  const [view, setView] = useState("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");      // confirm password (signup)
-  const [code, setCode] = useState("");       // verification code
+  const [confirm, setConfirm] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // ── Entrance animations ──────────────────────────────────────────────────
+  // ── Entrance: logo at 600ms, button at 1400ms
   useEffect(() => {
-    const t1 = setTimeout(() => setLogoIn(true), 400);
-    const t2 = setTimeout(() => setFormIn(true), 900);
+    const t1 = setTimeout(() => setLogoIn(true), 600);
+    const t2 = setTimeout(() => setPhase("button"), 1400);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
-  // ── After login success: fade intro out, reveal dashboard ────────────────
   const finish = () => {
     setFadeOut(true);
     setTimeout(() => onComplete?.(), 900);
   };
 
-  // ── Helper: clear messages when switching views ──────────────────────────
   const switchView = (v) => {
-    setView(v);
-    setError("");
-    setSuccess("");
-    setPassword("");
-    setConfirm("");
-    setCode("");
+    setView(v); setError(""); setSuccess("");
+    setPassword(""); setConfirm(""); setCode("");
   };
 
-  // ════════════════════════════════════════════════════════════════════════
-  // AUTH HANDLERS
-  // ════════════════════════════════════════════════════════════════════════
-
-  // ── LOGIN ────────────────────────────────────────────────────────────────
+  // ── Auth handlers (unchanged) ─────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError("Please enter username and password.");
-      return;
-    }
-    setLoading(true);
-    setError("");
+    if (!username.trim() || !password.trim()) { setError("Please enter username and password."); return; }
+    setLoading(true); setError("");
     try {
       try { await signOut(); } catch { }
       await signIn({ username: username.trim(), password });
-      // ✅ Login successful → fade out and show dashboard
       setSuccess("Access granted. Entering Cloud Seeker…");
       setTimeout(finish, 1200);
     } catch (err) {
-      console.error("Login error:", err);
       if (err.name === "UserNotConfirmedException") {
         setError("Account not confirmed. Check your email for the verification code.");
         setTimeout(() => switchView("confirm"), 1500);
@@ -148,168 +121,108 @@ export default function IntroScreen({ onComplete }) {
       } else {
         setError(err.message || "Login failed. Try again.");
       }
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ── SIGN UP ──────────────────────────────────────────────────────────────
   const handleSignUp = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !email.trim() || !password.trim()) {
-      setError("All fields are required.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    setLoading(true);
-    setError("");
+    if (!username.trim() || !email.trim() || !password.trim()) { setError("All fields are required."); return; }
+    if (password !== confirm) { setError("Passwords do not match."); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    setLoading(true); setError("");
     try {
-      await signUp({
-        username: username.trim(),
-        password,
-        options: {
-          userAttributes: {
-            email: email.trim(),
-          },
-        },
-      });
+      await signUp({ username: username.trim(), password, options: { userAttributes: { email: email.trim() } } });
       setSuccess("Account created! Check your email for the 6-digit verification code.");
       setTimeout(() => switchView("confirm"), 1500);
     } catch (err) {
-      console.error("SignUp error:", err);
-      if (err.name === "UsernameExistsException") {
-        setError("Username already exists. Try logging in.");
-      } else {
-        setError(err.message || "Sign up failed. Try again.");
-      }
-    } finally {
-      setLoading(false);
-    }
+      setError(err.name === "UsernameExistsException" ? "Username already exists. Try logging in." : err.message || "Sign up failed.");
+    } finally { setLoading(false); }
   };
 
-  // ── CONFIRM SIGN UP (verify email code) ──────────────────────────────────
   const handleConfirm = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !code.trim()) {
-      setError("Enter your username and verification code.");
-      return;
-    }
-    setLoading(true);
-    setError("");
+    if (!username.trim() || !code.trim()) { setError("Enter your username and verification code."); return; }
+    setLoading(true); setError("");
     try {
       await confirmSignUp({ username: username.trim(), confirmationCode: code.trim() });
       setSuccess("Email verified! You can now log in.");
       setTimeout(() => switchView("login"), 1500);
     } catch (err) {
-      console.error("Confirm error:", err);
       setError(err.message || "Invalid code. Check your email and try again.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ── FORGOT PASSWORD ───────────────────────────────────────────────────────
   const handleForgot = async (e) => {
     e.preventDefault();
-    if (!username.trim()) {
-      setError("Enter your username.");
-      return;
-    }
-    setLoading(true);
-    setError("");
+    if (!username.trim()) { setError("Enter your username."); return; }
+    setLoading(true); setError("");
     try {
       await resetPassword({ username: username.trim() });
       setSuccess("Password reset email sent! Check your inbox.");
     } catch (err) {
       setError(err.message || "Failed to send reset email.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ════════════════════════════════════════════════════════════════════════
-  // SHARED INPUT STYLE
-  // ════════════════════════════════════════════════════════════════════════
+  // ── Styles (unchanged) ────────────────────────────────────────────────────
   const inputField = {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
+    display: "flex", alignItems: "center", gap: "8px",
     background: "rgba(255,255,255,0.08)",
     border: "1px solid rgba(255,255,255,0.2)",
-    borderRadius: "10px",
-    padding: "10px 14px",
-    color: "rgba(255,255,255,0.6)",
-    transition: "border-color 0.2s",
+    borderRadius: "10px", padding: "10px 14px",
+    color: "rgba(255,255,255,0.6)", transition: "border-color 0.2s",
   };
-
   const inputStyle = {
-    background: "none",
-    border: "none",
-    outline: "none",
-    width: "100%",
-    color: "#D1D5DB",
-    fontSize: "13px",
+    background: "none", border: "none", outline: "none",
+    width: "100%", color: "#D1D5DB", fontSize: "13px",
     fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
   };
 
-  // ════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ════════════════════════════════════════════════════════════════════════
   return (
     <div style={{
-      position: "fixed",
-      inset: 0,
-      zIndex: 9999,
+      position: "fixed", inset: 0, zIndex: 9999,
       background: "#000",
       opacity: fadeOut ? 0 : 1,
       transition: "opacity 0.9s cubic-bezier(0.4,0,0.2,1)",
       overflow: "hidden",
     }}>
 
-      {/* ── Video — fullscreen cover, loops ── */}
+      {/* ── Keyframes ── */}
+      <style>{`
+        @keyframes cs-spin    { to { transform: rotate(360deg); } }
+        @keyframes cs-slideup { from { opacity:0; transform:translateY(50px) scale(.97); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @keyframes cs-pulse   {
+        0%,100% { box-shadow: 0 0 30px rgba(99,102,241,0.6), 0 0 60px rgba(2,136,209,0.3), 0 0 0 0 rgba(99,102,241,0.5); }
+  50%      { box-shadow: 0 0 50px rgba(99,102,241,0.9), 0 0 90px rgba(2,136,209,0.5), 0 0 0 14px rgba(99,102,241,0); }
+}
+        .cs-btn:hover { transform: translateY(-2px) scale(1.04) !important; }
+        .cs-btn:active { transform: scale(0.97) !important; }
+      `}</style>
+
+      {/* ── Video — fullscreen, NO overlay so it's fully visible ── */}
       <video
         ref={videoRef}
-        autoPlay
-        muted
-        loop          // ← loops forever until login succeeds
-        playsInline
+        autoPlay muted loop playsInline
         style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
           objectFit: "cover",
         }}
       >
         <source src="/furnace_remix.mp4" type="video/mp4" />
       </video>
 
-      {/* ── Gradient overlay ── */}
+      {/* ── Thin vignette on edges only — video still clearly visible ── */}
       <div style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.35) 40%, rgba(0,0,0,0.6) 100%)",
+        position: "absolute", inset: 0, pointerEvents: "none",
+        background: "radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.5) 100%)",
       }} />
 
-      {/* ── Top branding ── */}
+      {/* ── TOP BRANDING (unchanged position, same style) ── */}
       <div style={{
-        position: "absolute",
-        top: "6%",
-        left: 0,
-        right: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        pointerEvents: "none",
+        position: "absolute", top: "6%", left: 0, right: 0,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        gap: 10, pointerEvents: "none",
         opacity: logoIn ? 1 : 0,
         transform: logoIn ? "translateY(0)" : "translateY(-18px)",
         transition: "opacity 0.9s ease, transform 0.9s ease",
@@ -318,17 +231,12 @@ export default function IntroScreen({ onComplete }) {
           <CSLogo size={48} />
           <div>
             <div style={{
-              fontSize: 26,
-              fontWeight: 700,
-              letterSpacing: "0.12em",
-              color: "#F1F5F9",
-              fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+              fontSize: 26, fontWeight: 700, letterSpacing: "0.12em",
+              color: "#F1F5F9", fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
               textShadow: "0 2px 20px rgba(0,0,0,0.7)",
             }}>CLOUD SEEKER</div>
             <div style={{
-              fontSize: 11,
-              letterSpacing: "0.22em",
-              color: "#94A3B8",
+              fontSize: 11, letterSpacing: "0.22em", color: "#94A3B8",
               fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
               textShadow: "0 1px 8px rgba(0,0,0,0.9)",
             }}>AWS SECURITY INTELLIGENCE PLATFORM</div>
@@ -336,225 +244,222 @@ export default function IntroScreen({ onComplete }) {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          LOGIN FORM — centered on screen, over the video
-      ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: formIn ? "auto" : "none",
-      }}>
+      {/* ════════════════════════════════════════
+          PHASE: BUTTON — glowing access button
+      ════════════════════════════════════════ */}
+      {(phase === "button") && (
         <div style={{
-          width: "100%",
-          maxWidth: 360,
-          margin: "0 16px",
-          opacity: formIn ? 1 : 0,
-          transform: formIn ? "translateY(0) scale(1)" : "translateY(30px) scale(0.96)",
-          transition: "opacity 0.8s ease, transform 0.8s cubic-bezier(0.34,1.56,0.64,1)",
+          position: "absolute", bottom: "12%", left: 0, right: 0,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+          animation: "cs-slideup 0.7s ease forwards",
         }}>
+          {/* Glowing pulsing button */}
+          <button
+            className="cs-btn"
+            onClick={() => setPhase("form")}
+            style={{
+              padding: "15px 56px",
+              borderRadius: 50,
+              border: "2px solid rgba(99,102,241,0.9)",
+              background: "linear-gradient(135deg,rgba(79,70,229,0.45),rgba(2,136,209,0.45))",
+              backdropFilter: "blur(16px)",
+              WebkitBackdropFilter: "blur(16px)",
+              color: "#ffffff",
+              fontSize: 14,
+              fontWeight: 800,
+              fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              animation: "cs-pulse 2.5s ease-in-out infinite",
+              transition: "transform 0.2s",
+              display: "flex", alignItems: "center", gap: 10,
+              textShadow: "0 0 20px rgba(255,255,255,0.8)",
+              boxShadow: "0 0 30px rgba(99,102,241,0.6), 0 0 60px rgba(2,136,209,0.3), inset 0 1px 0 rgba(255,255,255,0.3)",
+            }}
+          >
+            {/* Shield icon */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Admin Access
+          </button>
 
-          {/* Glass card */}
           <div style={{
-            background: "rgba(255,255,255,0.05)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            border: "1px solid rgba(255,255,255,0.18)",
-            borderRadius: "20px",
-            padding: "32px 28px 28px",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.15)",
+            fontSize: 10, color: "rgba(148,163,184,0.45)",
+            letterSpacing: "0.14em", fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+            textTransform: "uppercase",
+          }}>
+            Click to authenticate
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════
+          PHASE: FORM — slides up, glass style
+      ════════════════════════════════════════ */}
+      {phase === "form" && (
+        <div style={{
+          position: "absolute", inset: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 360, margin: "0 16px",
+            animation: "cs-slideup 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards",
           }}>
 
-            {/* Card header */}
-            <div style={{ textAlign: "center", marginBottom: 24 }}>
-              <div style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: "#F1F5F9",
-                letterSpacing: "0.06em",
-                fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
-              }}>
-                {view === "login" && "Admin Access"}
-                {view === "signup" && "Create Account"}
-                {view === "confirm" && "Verify Email"}
-                {view === "forgot" && "Reset Password"}
+            {/* Glass card — fully transparent, video shows through */}
+            <div style={{
+              background: "rgba(255,255,255,0.05)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              borderRadius: "20px",
+              padding: "32px 28px 28px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.15)",
+            }}>
+
+              {/* Card header */}
+              <div style={{ textAlign: "center", marginBottom: 24 }}>
+                <div style={{
+                  fontSize: 15, fontWeight: 600, color: "#F1F5F9",
+                  letterSpacing: "0.06em", fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+                }}>
+                  {view === "login" && "Admin Access"}
+                  {view === "signup" && "Create Account"}
+                  {view === "confirm" && "Verify Email"}
+                  {view === "forgot" && "Reset Password"}
+                </div>
+                <div style={{
+                  fontSize: 11, color: "#64748B", marginTop: 4,
+                  letterSpacing: "0.08em", fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+                }}>
+                  {view === "login" && "Authenticate to enter the dashboard"}
+                  {view === "signup" && "Register a new admin account"}
+                  {view === "confirm" && "Enter the 6-digit code from your email"}
+                  {view === "forgot" && "Enter your username to reset password"}
+                </div>
               </div>
-              <div style={{
-                fontSize: 11,
-                color: "#64748B",
-                marginTop: 4,
-                letterSpacing: "0.08em",
-                fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
-              }}>
-                {view === "login" && "Authenticate to enter the dashboard"}
-                {view === "signup" && "Register a new admin account"}
-                {view === "confirm" && "Enter the 6-digit code from your email"}
-                {view === "forgot" && "Enter your username to reset password"}
-              </div>
+
+              {/* ── LOGIN ── */}
+              {view === "login" && (
+                <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={inputField}>
+                    <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
+                    <input style={inputStyle} type="text" placeholder="Username"
+                      value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required />
+                  </div>
+                  <div style={inputField}>
+                    <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
+                    <input style={inputStyle} type="password" placeholder="Password"
+                      value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
+                  </div>
+                  <MessageBox error={error} success={success} />
+                  <button type="submit" disabled={loading} style={primaryBtn(loading)}>
+                    {loading ? <Spinner /> : "Login"}
+                  </button>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <button type="button" onClick={() => switchView("signup")} style={ghostBtn}>Sign Up</button>
+                    <button type="button" onClick={() => switchView("forgot")} style={ghostBtn}>Forgot Password</button>
+                  </div>
+                  {/* ← Back button to return to video+button view */}
+                  <button type="button" onClick={() => { setPhase("button"); switchView("login"); }}
+                    style={{
+                      ...ghostBtn, flex: "none", width: "100%", marginTop: 2,
+                      color: "rgba(255,255,255,0.2)", fontSize: 10, letterSpacing: "0.08em"
+                    }}>
+                    ← Back
+                  </button>
+                </form>
+              )}
+
+              {/* ── SIGN UP ── */}
+              {view === "signup" && (
+                <form onSubmit={handleSignUp} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
+                    <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
+                  </div>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><EmailIcon /></span>
+                    <input style={inputStyle} type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required />
+                  </div>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
+                    <input style={inputStyle} type="password" placeholder="Password (min 8 chars)" value={password} onChange={e => setPassword(e.target.value)} required />
+                  </div>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
+                    <input style={inputStyle} type="password" placeholder="Confirm password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
+                  </div>
+                  <MessageBox error={error} success={success} />
+                  <button type="submit" disabled={loading} style={primaryBtn(loading)}>
+                    {loading ? <Spinner /> : "Create Account"}
+                  </button>
+                  <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
+                </form>
+              )}
+
+              {/* ── CONFIRM ── */}
+              {view === "confirm" && (
+                <form onSubmit={handleConfirm} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
+                    <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
+                  </div>
+                  <div style={inputField}>
+                    <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" />
+                      </svg>
+                    </span>
+                    <input style={inputStyle} type="text" placeholder="6-digit verification code"
+                      value={code} onChange={e => setCode(e.target.value)} maxLength={6} required />
+                  </div>
+                  <MessageBox error={error} success={success} />
+                  <button type="submit" disabled={loading} style={primaryBtn(loading)}>
+                    {loading ? <Spinner /> : "Verify Account"}
+                  </button>
+                  <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
+                </form>
+              )}
+
+              {/* ── FORGOT ── */}
+              {view === "forgot" && (
+                <form onSubmit={handleForgot} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={inputField}><span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
+                    <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
+                  </div>
+                  <MessageBox error={error} success={success} />
+                  <button type="submit" disabled={loading} style={primaryBtn(loading)}>
+                    {loading ? <Spinner /> : "Send Reset Email"}
+                  </button>
+                  <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
+                </form>
+              )}
+
             </div>
 
-            {/* ── LOGIN FORM ── */}
-            {view === "login" && (
-              <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
-                  <input
-                    style={inputStyle}
-                    type="text"
-                    placeholder="Username"
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    autoComplete="username"
-                    required
-                  />
-                </div>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
-                  <input
-                    style={inputStyle}
-                    type="password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    required
-                  />
-                </div>
-
-                {/* Error / success */}
-                <MessageBox error={error} success={success} />
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  style={primaryBtn(loading)}
-                >
-                  {loading ? <Spinner /> : "Login"}
-                </button>
-
-                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                  <button type="button" onClick={() => switchView("signup")} style={ghostBtn}>Sign Up</button>
-                  <button type="button" onClick={() => switchView("forgot")} style={ghostBtn}>Forgot Password</button>
-                </div>
-
-              </form>
-            )}
-
-            {/* ── SIGN UP FORM ── */}
-            {view === "signup" && (
-              <form onSubmit={handleSignUp} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
-                  <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
-                </div>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><EmailIcon /></span>
-                  <input style={inputStyle} type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required />
-                </div>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
-                  <input style={inputStyle} type="password" placeholder="Password (min 8 chars)" value={password} onChange={e => setPassword(e.target.value)} required />
-                </div>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><LockIcon /></span>
-                  <input style={inputStyle} type="password" placeholder="Confirm password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
-                </div>
-
-                <MessageBox error={error} success={success} />
-
-                <button type="submit" disabled={loading} style={primaryBtn(loading)}>
-                  {loading ? <Spinner /> : "Create Account"}
-                </button>
-                <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
-
-              </form>
-            )}
-
-            {/* ── CONFIRM / VERIFY FORM ── */}
-            {view === "confirm" && (
-              <form onSubmit={handleConfirm} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
-                  <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
-                </div>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" />
-                    </svg>
-                  </span>
-                  <input style={inputStyle} type="text" placeholder="6-digit verification code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} required />
-                </div>
-
-                <MessageBox error={error} success={success} />
-
-                <button type="submit" disabled={loading} style={primaryBtn(loading)}>
-                  {loading ? <Spinner /> : "Verify Account"}
-                </button>
-                <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
-
-              </form>
-            )}
-
-            {/* ── FORGOT PASSWORD FORM ── */}
-            {view === "forgot" && (
-              <form onSubmit={handleForgot} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-                <div style={inputField}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}><UserIcon /></span>
-                  <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
-                </div>
-
-                <MessageBox error={error} success={success} />
-
-                <button type="submit" disabled={loading} style={primaryBtn(loading)}>
-                  {loading ? <Spinner /> : "Send Reset Email"}
-                </button>
-                <button type="button" onClick={() => switchView("login")} style={ghostBtn}>← Back to Login</button>
-
-              </form>
-            )}
+            {/* Bottom label */}
+            <div style={{
+              textAlign: "center", marginTop: 12, fontSize: 10,
+              color: "rgba(100,116,139,0.5)", letterSpacing: "0.08em",
+              fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
+            }}>
+              SECURED BY AWS COGNITO
+            </div>
 
           </div>
-
-          {/* Subtle bottom label */}
-          <div style={{
-            textAlign: "center",
-            marginTop: 12,
-            fontSize: 10,
-            color: "rgba(100,116,139,0.6)",
-            letterSpacing: "0.08em",
-            fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
-          }}>
-            SECURED BY AWS COGNITO
-          </div>
-
         </div>
-      </div>
+      )}
 
     </div>
   );
 }
 
-// ── Reusable sub-components ───────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function MessageBox({ error, success }) {
   if (!error && !success) return null;
   return (
     <div style={{
-      padding: "9px 12px",
-      borderRadius: "8px",
-      fontSize: "12px",
+      padding: "9px 12px", borderRadius: "8px", fontSize: "12px",
       fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
       background: error ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
       border: error ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(34,197,94,0.3)",
@@ -569,9 +474,7 @@ function MessageBox({ error, success }) {
 function Spinner() {
   return (
     <span style={{
-      display: "inline-block",
-      width: 14,
-      height: 14,
+      display: "inline-block", width: 14, height: 14,
       border: "2px solid rgba(255,255,255,0.3)",
       borderTop: "2px solid #fff",
       borderRadius: "50%",
@@ -580,40 +483,22 @@ function Spinner() {
   );
 }
 
-// Shared button styles
 const primaryBtn = (loading) => ({
-  padding: "11px",
-  borderRadius: "10px",
-  border: "none",
-  outline: "none",
+  padding: "11px", borderRadius: "10px", border: "none", outline: "none",
   cursor: loading ? "default" : "pointer",
-  background: loading
-    ? "rgba(99,102,241,0.4)"
-    : "linear-gradient(135deg, #4F46E5 0%, #0288D1 100%)",
-  color: "#fff",
-  fontSize: "13px",
-  fontWeight: 600,
+  background: loading ? "rgba(99,102,241,0.4)" : "linear-gradient(135deg, #4F46E5 0%, #0288D1 100%)",
+  color: "#fff", fontSize: "13px", fontWeight: 600,
   fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
   letterSpacing: "0.04em",
   transition: "opacity 0.2s, transform 0.15s",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 6,
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
   marginTop: 4,
 });
 
 const ghostBtn = {
-  flex: 1,
-  padding: "9px",
-  borderRadius: "8px",
-  border: "1px solid rgba(255,255,255,0.08)",
-  outline: "none",
-  cursor: "pointer",
-  background: "rgba(255,255,255,0.04)",
-  color: "#94A3B8",
-  fontSize: "11px",
+  flex: 1, padding: "9px", borderRadius: "8px",
+  border: "1px solid rgba(255,255,255,0.08)", outline: "none", cursor: "pointer",
+  background: "rgba(255,255,255,0.04)", color: "#94A3B8", fontSize: "11px",
   fontFamily: "'DM Sans','Inter',system-ui,sans-serif",
-  letterSpacing: "0.04em",
-  transition: "background 0.2s",
+  letterSpacing: "0.04em", transition: "background 0.2s",
 };
