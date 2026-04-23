@@ -25,15 +25,15 @@ const DEMO_DATA = {
   sections: {
     iam: {
       score: 55, status: "WARNING",
-      totalUsers: 3, noMfa: ["Pranav", "developer1"], adminUsers: ["Jithu"],
-      oldKeys: [{ user: "developer1", age_days: 112 }],
+      totalUsers: 3, noMfa: ["Pranav", "ashwin"], adminUsers: ["Jithu"],
+      oldKeys: [{ user: "ashwin", age_days: 112 }],
       rootMfa: false, rootKeys: 0,
       issues: [
         { severity: "CRITICAL", msg: "Root account has NO MFA enabled", fix: "Go to AWS Console → IAM → Security credentials → Activate MFA" },
         { severity: "HIGH", msg: "User 'Pranav' has no MFA", fix: "IAM → Users → Pranav → Security credentials → Assign MFA device" },
-        { severity: "HIGH", msg: "User 'developer1' has no MFA", fix: "IAM → Users → developer1 → Security credentials → Assign MFA device" },
+        { severity: "HIGH", msg: "User 'ashwin' has no MFA", fix: "IAM → Users → ashwin → Security credentials → Assign MFA device" },
         { severity: "HIGH", msg: "User 'Jithu' has AdministratorAccess", fix: "Apply least-privilege — remove full admin, grant only needed permissions" },
-        { severity: "MEDIUM", msg: "Access key for 'developer1' is 112 days", fix: "IAM → Users → developer1 → Security credentials → Rotate access key" },
+        { severity: "MEDIUM", msg: "Access key for 'ashwin' is 112 days", fix: "IAM → Users → ashwin → Security credentials → Rotate access key" },
       ],
     },
     s3: {
@@ -90,7 +90,7 @@ const DEMO_DATA = {
       topThreats: [
         { event: "AuthorizeSecurityGroupIngress", reason: "SG opened to ENTIRE INTERNET port 22", severity: "CRITICAL", region: "eu-north-1", user: "Jithu", time: new Date(Date.now() - 1800000).toISOString() },
         { event: "TerminateInstances", reason: "EC2 instance TERMINATED in eu-north-1", severity: "HIGH", region: "eu-north-1", user: "Jithu", time: new Date(Date.now() - 3600000).toISOString() },
-        { event: "CreateAccessKey", reason: "New access key created for developer1", severity: "HIGH", region: "global", user: "Pranav", time: new Date(Date.now() - 7200000).toISOString() },
+        { event: "CreateAccessKey", reason: "New access key created for Aswin", severity: "HIGH", region: "global", user: "Pranav", time: new Date(Date.now() - 7200000).toISOString() },
       ],
       issues: [
         { severity: "CRITICAL", msg: "1 CRITICAL alert in last 7 days", fix: "Investigate and resolve critical alerts immediately" },
@@ -296,7 +296,6 @@ export default function SecurityTab({ API, authFetch }) {
     setLoading(true); setError(""); setIsDemo(false);
 
     if (useDemo || !API) {
-      // Simulate scan delay for realism
       await new Promise(r => setTimeout(r, 1800));
       setData(DEMO_DATA);
       setIsDemo(true);
@@ -312,14 +311,12 @@ export default function SecurityTab({ API, authFetch }) {
       if (r.ok) {
         setData(JSON.parse(text));
       } else {
-        // API failed → fall back to demo automatically
         console.warn("Security API failed, using demo data:", r.status, text.slice(0, 100));
         await new Promise(r2 => setTimeout(r2, 1000));
         setData(DEMO_DATA);
         setIsDemo(true);
       }
     } catch (e) {
-      // Network error → fall back to demo
       console.warn("Security fetch error, using demo:", e.message);
       await new Promise(r => setTimeout(r, 800));
       setData(DEMO_DATA);
@@ -334,6 +331,7 @@ export default function SecurityTab({ API, authFetch }) {
 
   const s = data?.sections || {};
 
+  // ── Landing screen ────────────────────────────────────────────────────────
   if (!started) {
     return (
       <div className="content-area">
@@ -347,35 +345,21 @@ export default function SecurityTab({ API, authFetch }) {
           <div style={{ fontSize: 13, color: "var(--t3)", marginBottom: 32, maxWidth: 420, margin: "0 auto 32px" }}>
             Scans your IAM users, S3 buckets, EC2 instances, security groups, logging config, and live threats.
           </div>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-            <button
-              onClick={() => { setStarted(true); runScan(false); }}
-              style={{
-                padding: "12px 28px", borderRadius: 10, cursor: "pointer",
-                background: "linear-gradient(135deg,#0288D1,#00BCD4)",
-                border: "none", color: "white", fontSize: 14, fontWeight: 600,
-                letterSpacing: ".04em", transition: "all .2s",
-                boxShadow: "0 4px 20px rgba(2,136,209,.4)",
-              }}
-              onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
-              onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-            >
-              🔍 Scan Live AWS Account
-            </button>
-            <button
-              onClick={() => { setStarted(true); runScan(true); }}
-              style={{
-                padding: "12px 28px", borderRadius: 10, cursor: "pointer",
-                background: "rgba(99,102,241,.12)", border: "1px solid rgba(99,102,241,.3)",
-                color: "#818CF8", fontSize: 14, fontWeight: 600,
-                transition: "all .2s",
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(99,102,241,.2)"}
-              onMouseLeave={e => e.currentTarget.style.background = "rgba(99,102,241,.12)"}
-            >
-              👁 View Demo Data
-            </button>
-          </div>
+          {/* REMOVED: "View Demo Data" button. Only one button remains. */}
+          <button
+            onClick={() => { setStarted(true); runScan(false); }}
+            style={{
+              padding: "12px 28px", borderRadius: 10, cursor: "pointer",
+              background: "linear-gradient(135deg,#0288D1,#00BCD4)",
+              border: "none", color: "white", fontSize: 14, fontWeight: 600,
+              letterSpacing: ".04em", transition: "all .2s",
+              boxShadow: "0 4px 20px rgba(2,136,209,.4)",
+            }}
+            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
+            onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
+          >
+            🔍 Scan Live AWS Account
+          </button>
         </div>
       </div>
     );
@@ -408,7 +392,6 @@ export default function SecurityTab({ API, authFetch }) {
             <div style={{ fontSize: 16, fontWeight: 600, color: "var(--t1)", marginBottom: 6 }}>Scanning your AWS environment</div>
             <div style={{ fontSize: 12, color: "var(--t3)" }}>Checking IAM · S3 · EC2 · Security Groups · CloudTrail · Alerts</div>
           </div>
-          {/* Animated steps */}
           {[
             { label: "Checking IAM users and policies", delay: 0.0 },
             { label: "Scanning S3 bucket permissions", delay: 0.4 },
@@ -437,45 +420,23 @@ export default function SecurityTab({ API, authFetch }) {
     <div className="content-area">
       <style>{`@keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`}</style>
 
-      {/* Header */}
+      {/* Header — REMOVED: isDemo badge and "Scan Live AWS" button */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>AWS Security Scan</div>
-            {isDemo && (
-              <span style={{
-                fontSize: 10, fontWeight: 700, padding: "3px 8px",
-                borderRadius: 99, background: "rgba(99,102,241,.15)",
-                border: "1px solid rgba(99,102,241,.3)", color: "#818CF8",
-                letterSpacing: ".06em",
-              }}>DEMO</span>
-            )}
-          </div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: "var(--t1)" }}>AWS Security Scan</div>
           <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
             Real-time analysis of IAM · S3 · EC2 · Network · Logging · Threats
             {data?.scannedAt && <span style={{ marginLeft: 8 }}>· Scanned {new Date(data.scannedAt).toLocaleTimeString()}</span>}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {isDemo && (
-            <button
-              onClick={() => runScan(false)}
-              style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(0,188,212,.3)", background: "rgba(0,188,212,.08)", color: "#06B6D4", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .2s" }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(0,188,212,.16)"}
-              onMouseLeave={e => e.currentTarget.style.background = "rgba(0,188,212,.08)"}
-            >
-              ⚡ Scan Live AWS
-            </button>
-          )}
-          <button
-            onClick={() => runScan(isDemo)}
-            style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.25)", background: "rgba(99,102,241,.08)", color: "#818CF8", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 5 }}
-            onMouseEnter={e => e.currentTarget.style.background = "rgba(99,102,241,.16)"}
-            onMouseLeave={e => e.currentTarget.style.background = "rgba(99,102,241,.08)"}
-          >
-            ⟳ Re-scan
-          </button>
-        </div>
+        <button
+          onClick={() => runScan(isDemo)}
+          style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,.25)", background: "rgba(99,102,241,.08)", color: "#818CF8", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 5 }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(99,102,241,.16)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(99,102,241,.08)"}
+        >
+          ⟳ Re-scan
+        </button>
       </div>
 
       {/* Overall score banner */}
@@ -581,7 +542,6 @@ export default function SecurityTab({ API, authFetch }) {
             <Stat label="Total SGs" value={s.network?.totalSGs ?? 0} color="#6366F1" />
             <Stat label="Dangerous ❌" value={s.network?.dangerousSGs?.length ?? 0} color="#EF4444" warn />
           </div>
-          {/* Dangerous SG table */}
           {(s.network?.dangerousSGs || []).length > 0 && (
             <div style={{ marginBottom: 8 }}>
               {(s.network.dangerousSGs || []).slice(0, 3).map((sg, i) => (
