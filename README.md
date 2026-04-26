@@ -40,8 +40,8 @@ CloudTrail → S3 → EventBridge → Step Functions
 | 9 | **AWS Config** | Security compliance rules |
 | 10 | **API Gateway** | REST API for the frontend |
 | 11 | **Amplify** | Hosts the React frontend |
-| 12 | **CloudFront** | CDN for fast global delivery |
-| 13 | **QuickSight** | Analytics dashboards |
+| 12 | **IAM** | Security |
+| 13 | **AWS congito** | login
 
 ---
 
